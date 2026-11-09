@@ -11,6 +11,8 @@ node_modules/
 *.zip
 .DS_Store
 .packageignore
+justfile
+tools/
 manifest.json
 manifest.chrome.json
 manifest.firefox.json
