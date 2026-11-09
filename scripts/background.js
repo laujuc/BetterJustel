@@ -130,4 +130,27 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
 			chrome.tabs.create({ url: message.url });
 		}
 	}
+
+	// Fallback for the Fisconet button when a content-script fetch is blocked.
+	// Only this fixed endpoint is fetched, and only for a document id, so a
+	// page cannot use the extension as an open proxy.
+	if (message?.action === "fisconetDocument") {
+		const guid = message.guid;
+		const allowed = sender.tab?.url?.startsWith("https://www.minfin.fgov.be/")
+			&& typeof guid === "string"
+			&& /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(guid);
+		if (!allowed) {
+			sendResponse({ok: false, error: "Refused"});
+			return;
+		}
+		fetch("https://www.minfin.fgov.be/myminfin-rest/fisconetPlus/public/document/" + guid, {
+			headers: {Accept: "application/json"},
+		}).then(response => {
+			if (!response.ok) throw new Error("HTTP " + response.status);
+			return response.json();
+		}).then(json => sendResponse({ok: true, json})).catch(error => {
+			sendResponse({ok: false, error: error.message});
+		});
+		return true;
+	}
 });
