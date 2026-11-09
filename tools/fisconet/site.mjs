@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 // Build a minimalist static site from a folder produced by `just fisconet`.
 //
-//   node tools/fisconet/site.mjs <downloaded-dir> [--project law-cir] [--publish]
+//   node tools/fisconet/site.mjs <downloaded-dir> [--publish]
 //
 // Writes <dir>/site/index.html, one HTML page per article, style.css, and a
 // copy of the Markdown file when it exists. Article links become art-<id>.html
 // (pico+ pages also serves that URL without the extension).
 //
 // pico+ pages (pgs.sh) is a static-file host, not a Markdown CMS, so the
-// readable site is HTML. --publish runs rsync when it is installed; otherwise
-// it prints an scp command. The upload uses your pico SSH key. This script
-// does not know your pico username: the live URL is
-// https://<username>-law-<slug>.pgs.sh
+// readable site is HTML. Every code is uploaded into the same project, as a
+// subdirectory, so one site holds all of them:
+//
+//   rsync -rtv --delete ".../cir-92-revenus-2027/site/" pgs.sh:/laws/cir-92-revenus-2027/
+//   https://ljuc-laws.pgs.sh/cir-92-revenus-2027/
+//
+// SSH upload is always to pgs.sh. ljuc-laws.pgs.sh is the public hostname of
+// the `laws` project, not an rsync host. --delete applies only to that code's
+// subdirectory, so other codes under /laws/ are left in place. --publish runs
+// rsync when it is installed; otherwise it prints an scp command.
 //
 // Requires Node.js 18+. No npm dependencies. Works the same on Windows
 // (PowerShell) and Unix: it is a Node script, not a shell script.
@@ -23,14 +29,19 @@ import path from 'node:path';
 
 const core = createRequire(import.meta.url)('../../scripts/lib/fisconet-core.js');
 
+const PICO_USER = 'ljuc';
+const PICO_PROJECT = 'laws';
+
 const USAGE = `Usage:
-  site.mjs <downloaded-dir> [--project NAME] [--publish]
+  site.mjs <downloaded-dir> [--publish] [--project laws] [--user ljuc]
 
   <downloaded-dir>   A folder created by \`just fisconet\` (contains raw/ and usually a .md file)
-  --project NAME     pico+ project name (default: law-<folder name>)
-  --publish          Upload site/ to pgs.sh with rsync when rsync is installed
+  --project NAME     pico+ project (default: laws). Each code is a subdirectory.
+  --user NAME        pico username used in the public URL (default: ljuc)
+  --publish          Upload site/ to pgs.sh:/laws/<folder>/ with rsync when rsync is installed
 
 The site is always written to <downloaded-dir>/site/ before any upload.
+Public URL: https://ljuc-laws.pgs.sh/<folder>/
 `;
 
 function escapeHtml(text) {
@@ -71,22 +82,32 @@ function parseArguments(argv) {
 		if (arg === '--publish') options.publish = true;
 		else if (arg === '--help' || arg === '-h') options.help = true;
 		else if (arg === '--project') options.project = argv[++i];
+		else if (arg === '--user') options.user = argv[++i];
 		else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
 		else positional.push(arg);
 	}
 	return { positional, options };
 }
 
-function projectName(dir, override) {
-	const raw = override || `law-${core.slugify(path.basename(dir)) || 'code'}`;
-	const name = String(raw)
+function picoSlug(value, label) {
+	const name = String(value || '')
 		.toLowerCase()
 		.replace(/[^a-z0-9-]+/g, '-')
 		.replace(/^-+|-+$/g, '');
 	if (!name || !/^[a-z0-9]/.test(name)) {
-		throw new Error(`Invalid pico+ project name "${override ?? name}"`);
+		throw new Error(`Invalid pico+ ${label} "${value}"`);
 	}
-	return name.startsWith('law-') ? name : `law-${name}`;
+	return name;
+}
+
+// One project (`laws`), one subdirectory per code. The folder name is the
+// public path: fisconet/cir-92-revenus-2027 -> /laws/cir-92-revenus-2027/.
+function publishTarget(dir, options) {
+	return {
+		user: picoSlug(options.user || PICO_USER, 'username'),
+		project: picoSlug(options.project || PICO_PROJECT, 'project'),
+		code: picoSlug(core.slugify(path.basename(dir)) || 'code', 'code name'),
+	};
 }
 
 async function findRoot(dir) {
@@ -277,15 +298,17 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line);
 }
 `;
 
-function publishCommands(siteDir, project) {
+function publishCommands(siteDir, target) {
 	const source = path.resolve(siteDir).replace(/\\/g, '/').replace(/\/?$/, '/');
-	const dest = `pgs.sh:/${project}/`;
+	// pgs.sh:/<project>/<code>/ is the SSH destination. The public host is
+	// https://<user>-<project>.pgs.sh/<code>/ (ljuc-laws.pgs.sh is not an rsync host).
+	const dest = `pgs.sh:/${target.project}/${target.code}/`;
 	return {
 		source,
 		dest,
 		rsync: `rsync -rtv --delete "${source}" ${dest}`,
 		scp: `scp -r "${source}." ${dest}`,
-		url: `https://<username>-${project}.pgs.sh`,
+		url: `https://${target.user}-${target.project}.pgs.sh/${target.code}/`,
 	};
 }
 
@@ -294,8 +317,8 @@ function rsyncAvailable() {
 	return !result.error && result.status === 0;
 }
 
-function publish(siteDir, project) {
-	const commands = publishCommands(siteDir, project);
+function publish(siteDir, target) {
+	const commands = publishCommands(siteDir, target);
 	if (!rsyncAvailable()) {
 		console.error('rsync is not installed. Upload with scp (it does not delete files removed from the site):');
 		console.error(`  ${commands.scp}`);
@@ -421,24 +444,24 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 	const notFound = pageShell(`Introuvable — ${title}`, `<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour à la table des matières</a></p></main>`);
 	await writeFile(path.join(siteDir, '404.html'), notFound);
 
-	const project = projectName(dir, options.project);
-	const commands = publishCommands(siteDir, project);
+	const target = publishTarget(dir, options);
+	const commands = publishCommands(siteDir, target);
 	console.error(`Wrote ${siteDir}`);
 	console.error(`  ${articles.length} articles, ${analysis.root.mode} layout${missing.length ? `, ${missing.length} missing` : ''}`);
 	if (historyLeaks) {
 		console.error(`  warning: ${historyLeaks} page(s) still mention "Historique des modifications"`);
 	}
 	console.error('');
-	console.error(`pico+ pages project: ${project}`);
-	console.error(`Live URL (replace <username> with your pico name): ${commands.url}`);
+	console.error(`pico+ pages: ${commands.url}`);
+	console.error(`SSH destination (project ${target.project}, this code only): ${commands.dest}`);
 	console.error('Upload with your pico SSH key:');
 	console.error(`  ${commands.rsync}`);
 	console.error('Without rsync (does not delete removed files):');
 	console.error(`  ${commands.scp}`);
 
 	if (options.publish) {
-		publish(siteDir, project);
-		console.error(`Uploaded. Open ${commands.url} once you know your pico username.`);
+		publish(siteDir, target);
+		console.error(`Uploaded. Open ${commands.url}`);
 	}
 	if (missing.length) process.exitCode = 1;
 }

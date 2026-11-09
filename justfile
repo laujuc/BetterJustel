@@ -52,7 +52,7 @@ pdfs dir="laws":
 #   just fisconet-pdf fisconet/<name>/<name>.md
 #   just fisconet-site fisconet/<name>  minimalist HTML site -> fisconet/<name>/site/
 #   just fisconet-publish fisconet/<name>
-#                                   upload that site to pico+ pages as law-<name>
+#                                   upload that site to pgs.sh:/laws/<name>/
 
 # List FisconetPlus documents (filter by words, e.g. "tva" or "cir revenus 2027")
 fisconet-list filter="":
@@ -71,6 +71,6 @@ fisconet-pdf file:
 fisconet-site dir *options:
     node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" {{ options }}
 
-# Upload that site to pico+ pages (pgs.sh) as law-<name>. Prints the command; runs rsync when it is installed
+# Upload that site to pico+ pages at pgs.sh:/laws/<name>/ (https://ljuc-laws.pgs.sh/<name>/). Prints the command; runs rsync when it is installed
 fisconet-publish dir *options:
     node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" --publish {{ options }}
