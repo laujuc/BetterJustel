@@ -5,8 +5,11 @@ $if(title)$
 #set document(title: [$title$], author: ("Better Justel",))
 $endif$
 
-// Thematic breaks emitted by the typst writer for Markdown horizontal rules
-#let divider = () => line(start: (30%, 0%), end: (70%, 0%), stroke: 0.5pt + luma(160))
+// Pandoc emits different Typst for Markdown horizontal rules depending on
+// its version: "#horizontalrule" (a content variable) up to pandoc 3.10,
+// "#divider()" (a function call) from pandoc 3.11 on — define both
+#let horizontalrule = line(start: (30%, 0%), end: (70%, 0%), stroke: 0.5pt + luma(160))
+#let divider = () => horizontalrule
 
 // Every archived version starts on a new page, except the first one which
 // follows the title on the opening page
