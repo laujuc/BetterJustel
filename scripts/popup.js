@@ -1,5 +1,7 @@
 const DROPBOX_CLIENT_ID = "bxh6gtfvn361dbe";
 const DROPBOX_REDIRECT_URL = "https://www.ejustice.just.fgov.be/eli/";
+const PCLOUD_REDIRECT_URL = "https://www.ejustice.just.fgov.be/eli/";
+const PCLOUD_APP_REGISTRATION_URL = "https://my.pcloud.com/#page=apps";
 
 import {getStorage, setStorage, getAllHighlights, requestDataCollectionPermissions} from "../scripts/util.js";
 import {parseJustelQuery, buildJustelSearchUrl} from "../scripts/popup-search.js";
@@ -124,35 +126,69 @@ async function importHighlights() {
 	alert(`Imported highlights for ${counter} acts`);
 }
 
+async function requestBackupPermissions() {
+	const dataConsentGranted = await requestDataCollectionPermissions([
+		"browsingActivity",
+		"websiteContent",
+		"websiteActivity",
+	]);
+	if (!dataConsentGranted) {
+		alert("Backup was not enabled because Firefox data collection consent was not granted.");
+		return false;
+	}
+	return true;
+}
+
+function activeBackupProvider(highlightsBackup) {
+	if (!highlightsBackup.accessToken) { return undefined; }
+	// Configurations saved before pCloud support have no provider field
+	return highlightsBackup.provider === "pcloud" ? "pcloud" : "dropbox";
+}
+
+async function disableCloudBackup() {
+	await setStorage("highlightsBackup", {});
+	updateBackupLinks({});
+}
+
+function updateBackupLinks(highlightsBackup) {
+	const provider = activeBackupProvider(highlightsBackup);
+	document.querySelector("a#toggleDropboxBackup").innerText = provider === "dropbox"
+		? "Disable Dropbox backup of highlights"
+		: "Enable Dropbox backup of highlights";
+	document.querySelector("a#togglePcloudBackup").innerText = provider === "pcloud"
+		? "Disable pCloud backup of highlights"
+		: "Enable pCloud backup of highlights";
+}
+
+async function requestBackupFilename(highlightsBackup) {
+	highlightsBackup.filename = prompt("Please enter the file name of backups", "Highlights Backup");
+	if (!highlightsBackup.filename?.trim()) { return false; }
+	highlightsBackup.filename = highlightsBackup.filename.trim();
+	return true;
+}
+
 async function toggleDropboxBackup() {
 	let highlightsBackup = await getStorage("highlightsBackup") || {};
+	if (activeBackupProvider(highlightsBackup) === "pcloud") {
+		alert("pCloud backup is currently active. Disable it first to switch to Dropbox.");
+		return;
+	}
 	if (highlightsBackup.accessToken) {
 		let choice = confirm("Press OK to disable Dropbox backup of highlights");
 		if (choice) {
-			highlightsBackup = {};
-			await setStorage("highlightsBackup", highlightsBackup);
-			document.querySelector("a#toggleDropboxBackup").innerText = "Enable Dropbox backup of highlights";
+			await disableCloudBackup();
 		}
 	}
 	else {
-		const dataConsentGranted = await requestDataCollectionPermissions([
-			"browsingActivity",
-			"websiteContent",
-			"websiteActivity",
-		]);
-		if (!dataConsentGranted) {
-			alert("Dropbox backup was not enabled because Firefox data collection consent was not granted.");
-			return;
-		}
+		if (!await requestBackupPermissions()) { return; }
 		const Dropbox = getDropbox();
 		let dbxAuth = new Dropbox.DropboxAuth({
 			clientId: DROPBOX_CLIENT_ID,
 		});
-		highlightsBackup.filename = prompt("Please enter the file name of backups", "Highlights Backup");
-		if (!highlightsBackup.filename?.trim()) { return; }
-		highlightsBackup.filename = highlightsBackup.filename.trim();
+		if (!await requestBackupFilename(highlightsBackup)) { return; }
 		alert("You will now be redirected to authorize this app to access your Dropbox. Access is only requested to a folder dedicated to this app. No access will be granted to the rest of your Dropbox. Backups of your highlights will be made daily.");
 		let authUrl = await dbxAuth.getAuthenticationUrl(DROPBOX_REDIRECT_URL, undefined, 'code', 'offline', undefined, undefined, true);
+		highlightsBackup.provider = "dropbox";
 		highlightsBackup.codeVerifier = dbxAuth.codeVerifier;
 		highlightsBackup.redirect = "https://www.ejustice.just.fgov.be/loi/loi.htm";
 		await setStorage("highlightsBackup", highlightsBackup);
@@ -160,6 +196,59 @@ async function toggleDropboxBackup() {
 			url: authUrl
 		});
 	}
+}
+
+// pCloud does not support the PKCE-less code flow of Dropbox: the token
+// exchange requires a client secret, which cannot be kept hidden in a
+// browser extension. The implicit flow is used instead: the access token
+// is returned directly in the redirect URL fragment. Each user must register
+// their own pCloud application once to obtain a client ID.
+async function getPcloudClientId() {
+	let clientId = await getStorage("pcloudClientId");
+	if (clientId?.trim()) { return clientId.trim(); }
+	clientId = prompt(
+		`Backups to pCloud require a pCloud application of your own.\n\n`
+		+ `1. Register an application on ${PCLOUD_APP_REGISTRATION_URL} (choose the OAuth 2.0 API);\n`
+		+ `2. Set its redirect URI to ${PCLOUD_REDIRECT_URL};\n`
+		+ `3. Enter the Client ID of the application below.`,
+		""
+	);
+	if (!clientId?.trim()) { return undefined; }
+	clientId = clientId.trim();
+	await setStorage("pcloudClientId", clientId);
+	return clientId;
+}
+
+async function togglePcloudBackup() {
+	let highlightsBackup = await getStorage("highlightsBackup") || {};
+	if (activeBackupProvider(highlightsBackup) === "dropbox") {
+		alert("Dropbox backup is currently active. Disable it first to switch to pCloud.");
+		return;
+	}
+	if (highlightsBackup.accessToken) {
+		let choice = confirm("Press OK to disable pCloud backup of highlights");
+		if (choice) {
+			await disableCloudBackup();
+		}
+		return;
+	}
+	if (!await requestBackupPermissions()) { return; }
+	const clientId = await getPcloudClientId();
+	if (!clientId) { return; }
+	if (!await requestBackupFilename(highlightsBackup)) { return; }
+	alert("You will now be redirected to authorize this app to access your pCloud. Access will be granted to your full pCloud storage; backups are stored in the 'BetterJustel' folder. Backups of your highlights will be made daily.");
+	highlightsBackup.provider = "pcloud";
+	highlightsBackup.redirect = "https://www.ejustice.just.fgov.be/loi/loi.htm";
+	await setStorage("highlightsBackup", highlightsBackup);
+	const authUrl = new URL("https://my.pcloud.com/oauth2/authorize");
+	authUrl.search = new URLSearchParams({
+		client_id: clientId,
+		response_type: "token",
+		redirect_uri: PCLOUD_REDIRECT_URL,
+	});
+	chrome.tabs.create({
+		url: authUrl.href
+	});
 }
 
 async function exportAllHighlights() {
@@ -362,13 +451,12 @@ fastOfflineBrowsing.addEventListener("change", async function() {
 });
 
 let highlightsBackup = await getStorage("highlightsBackup") || {};
-if (highlightsBackup.accessToken) {
-	document.querySelector("a#toggleDropboxBackup").innerText = "Disable Dropbox backup of highlights";
-}
+updateBackupLinks(highlightsBackup);
 
 
 document.querySelector("a#importHighlights").addEventListener("click", runPopupCommand(importHighlights));
 document.querySelector("a#toggleDropboxBackup").addEventListener("click", runPopupCommand(toggleDropboxBackup));
+document.querySelector("a#togglePcloudBackup").addEventListener("click", runPopupCommand(togglePcloudBackup));
 document.querySelector("a#exportAllHighlights").addEventListener("click", runPopupCommand(exportAllHighlights));
 
 document.querySelector("span#version").innerText = chrome.runtime.getManifest().version;

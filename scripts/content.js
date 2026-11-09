@@ -30,8 +30,8 @@
 	const {analyseContent, buildContent} = BJ.analyseModule(ctx);
 	Object.assign(ctx, {buildContent});
 
-	const {runDropboxBackup} = BJ.dropboxModule(ctx);
-	Object.assign(ctx, {runDropboxBackup});
+	const {runCloudBackup} = BJ.backupModule(ctx);
+	Object.assign(ctx, {runCloudBackup});
 
 	const {updateBookmarkBar, manageHighlights} = BJ.highlightsModule(ctx);
 	Object.assign(ctx, {updateBookmarkBar, manageHighlights});
@@ -311,8 +311,26 @@
 	}
 	else if ( (window.location.origin + window.location.pathname) == "https://www.ejustice.just.fgov.be/eli/" ) {
 		// ELI about page
+		// Test if redirect from pCloud (implicit OAuth flow: the access token is
+		// passed in the URL fragment, together with the API host name matching
+		// the data center where the user is registered)
+		if ( window.location.hash.match(/access_token|error/) ) {
+			let fragment = new URLSearchParams(window.location.hash.slice(1));
+			if ( fragment.get("access_token") ) {
+				ctx.highlightsBackup.provider = "pcloud";
+				ctx.highlightsBackup.accessToken = fragment.get("access_token");
+				ctx.highlightsBackup.hostname = fragment.get("hostname") || "api.pcloud.com";
+				delete ctx.highlightsBackup.refreshToken;
+				await setStorage("highlightsBackup", ctx.highlightsBackup);
+				window.location.href = ctx.highlightsBackup.redirect || "https://www.ejustice.just.fgov.be/loi/loi.htm";
+			}
+			else {
+				alert("User refused to grant access to pCloud");
+				if (ctx.highlightsBackup?.redirect) { window.location.href = ctx.highlightsBackup.redirect; }
+			}
+		}
 		// Test if redirect from Dropbox
-		if ( window.location.search.match(/code/) ) {
+		else if ( window.location.search.match(/code/) ) {
 			let dbxAuth = new Dropbox.DropboxAuth({
 				clientId: DROPBOX_CLIENT_ID,
 			});

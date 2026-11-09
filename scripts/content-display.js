@@ -437,7 +437,7 @@ window.BJ.displayModule = function(ctx) {
 		$("div#content").on("mouseup", ctx.manageHighlights );
 		$("div#content").append("<div id='toolbar' style='display: none;'><div class='circle yellow'></div><div class='circle green'></div><div class='circle blue'></div>"
 								+"<div class='circle red'></div><div class='circle violet'></div><div class='circle'></div></div>");
-		await ctx.runDropboxBackup();
+		await ctx.runCloudBackup();
 		// Display status message if extension was updated
 		const lastVersion = await ctx.getStorage("extensionVersion");
 		const currentVersion = chrome.runtime.getManifest().version;
