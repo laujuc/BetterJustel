@@ -40,6 +40,8 @@
 	Object.assign(ctx, {loadAndDisplayCaseLaw, clearCaselawFetchFlag, isInCaselawBlock, saveCaselawHighlight, removeCaselawHighlight, updateCaselawHighlight});
 
 	const {analyseFirstInfo, analyseFurtherInfo} = BJ.infoModule(ctx);
+	const {exportTimeline} = BJ.exportModule(ctx);
+	Object.assign(ctx, {exportTimeline});
 
 	const {displayContent} = BJ.displayModule(ctx);
 

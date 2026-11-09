@@ -185,6 +185,40 @@ window.BJ.displayModule = function(ctx) {
 		}
 	}
 
+	function setupTimelineExport() {
+		const info = document.querySelector("div#info");
+		const actions = info?.querySelector("#addinfodiv");
+		if (!actions) { return; }
+		let link = actions.querySelector("a#btnExportTimeline");
+		if (!link) {
+			const span = document.createElement("span");
+			span.classList.add("act-header__action");
+			link = document.createElement("a");
+			link.id = "btnExportTimeline";
+			link.href = "#";
+			link.classList.add("act-header__button");
+			link.textContent = "Timeline (MD/PDF)";
+			span.append(link);
+			actions.append(span);
+		}
+		else {
+			link.classList.add("act-header__button");
+			link.parentElement?.classList.add("act-header__action");
+		}
+		link.addEventListener("click", function(event) {
+			event.preventDefault();
+			const popup = window.open("", "_blank");
+			if (!popup) {
+				ctx.showStatusMessage("Allow pop-ups to export the law timeline");
+				return;
+			}
+			ctx.exportTimeline(popup).catch(error => {
+				console.error("[Better Justel] Could not export law timeline:", error.message);
+				ctx.showStatusMessage(`Could not export law timeline: ${error.message}`);
+			});
+		});
+	}
+
 	async function displayContent(online) {
 		async function loadHighlights() {
 			ctx.highlights = {
@@ -284,6 +318,7 @@ window.BJ.displayModule = function(ctx) {
 		normalizeInfoLinks();
 		setupCopyEli();
 		enhanceInfoPanel();
+		setupTimelineExport();
 		$("div#info a#btnSavePDF").on("click", function (event, date) {
 			let a = document.createElement("a");
 			a.style = "display: none";
