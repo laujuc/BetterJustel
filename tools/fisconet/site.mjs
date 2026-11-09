@@ -3,11 +3,11 @@
 //
 //   node tools/fisconet/site.mjs <downloaded-dir> [--publish]
 //
-// Writes <dir>/site/index.html, one HTML page per article, style.css, a shared
-// sidebar table of contents (toc.html), and a copy of the Markdown file when it
-// exists. Article links become art-<id>.html (pico+ pages also serves that URL
-// without the extension). The sidebar is one file framed into every page, so a
-// code of several hundred articles is not copied into each page.
+// Writes <dir>/site/index.html, one HTML page per article, style.css, a
+// standalone toc.html, and a copy of the Markdown file when it exists. Article
+// links become art-<id>.html (pico+ pages also serves that URL without the
+// extension). The sidebar is inlined HTML and CSS: pgs sends
+// X-Frame-Options: DENY, so an iframe of toc.html is refused. No script.
 //
 // pico+ pages (pgs.sh) is a static-file host, not a Markdown CMS, so the
 // readable site is HTML. Every code is uploaded into the same project, as a
@@ -161,23 +161,45 @@ async function findRoot(dir) {
 	throw new Error(`No Fisconet code found in ${dir}. Pass a folder created by \`just fisconet\`.`);
 }
 
-function renderToc(items) {
+// Sections on the path to the current article stay open, so the reader
+// sees where they are without a script to scroll the list.
+function ancestorSections(items, currentId) {
+	const open = new Set();
+	if (!currentId) return open;
+	const stack = [];
+	for (const item of items) {
+		if (item.kind === 'section') {
+			while (stack.length && stack[stack.length - 1].depth >= item.depth) stack.pop();
+			stack.push(item);
+		} else if (item.id === currentId) {
+			for (const section of stack) open.add(section);
+			break;
+		}
+	}
+	return open;
+}
+
+function renderToc(items, currentId = null, expandAll = false) {
+	const openSections = ancestorSections(items, currentId);
 	const parts = ['<ul>'];
 	const stack = [0];
 	const closeTo = (depth) => {
 		while (stack.length > 1 && stack[stack.length - 1] >= depth) {
-			parts.push('</ul></li>');
+			parts.push('</ul></details></li>');
 			stack.pop();
 		}
 	};
 	for (const item of items) {
 		if (item.kind === 'section') {
 			closeTo(item.depth);
-			parts.push(`<li class="section"><span class="section-label">${escapeHtml(item.label)}</span><ul>`);
+			const open = expandAll || openSections.has(item) ? ' open' : '';
+			parts.push(`<li class="section"><details${open}><summary>${escapeHtml(item.label)}</summary><ul>`);
 			stack.push(item.depth);
 		} else {
 			const heading = core.articleHeadingText(item.label);
-			parts.push(`<li class="article"><a id="${item.id}" href="${item.id}.html" target="_parent">${escapeHtml(heading)}</a></li>`);
+			const current = item.id === currentId;
+			const attrs = current ? ' id="current" aria-current="page"' : '';
+			parts.push(`<li class="article"><a${attrs} href="${escapeHtml(item.id)}.html">${escapeHtml(heading)}</a></li>`);
 		}
 	}
 	closeTo(0);
@@ -215,13 +237,21 @@ function retarget(html, currentId, idSet, idByGuid) {
 	return out;
 }
 
-// tocHash: article id to highlight, '' for the index, null to omit the sidebar
-// (toc.html must not frame itself).
-function pageShell(title, body, tocHash = '') {
-	const sidebar = tocHash === null ? '' : `<aside class="toc-side">
+// tocHtml is the inlined list. null omits the sidebar (the standalone toc page).
+// homeLabel is the short name in the sidebar; title is the document title.
+function pageShell(title, body, tocHtml = null, currentLabel = '', homeLabel = '') {
+	const here = currentLabel
+		? `<a class="toc-current" href="#current">${escapeHtml(currentLabel)}</a>`
+		: '';
+	const home = homeLabel || title;
+	const sidebar = tocHtml == null ? '' : `<aside class="toc-side">
 <details open>
 <summary>Table des matières</summary>
-<iframe src="toc.html${tocHash ? `#${tocHash}` : ''}" title="Table des matières"></iframe>
+<a class="toc-home" href="index.html">${escapeHtml(home)}</a>
+${here}
+<nav class="toc" aria-label="Table des matières">
+${tocHtml}
+</nav>
 </details>
 </aside>`;
 	return `<!DOCTYPE html>
@@ -251,33 +281,16 @@ function tocPage(title, items) {
 <title>Table des matières — ${escapeHtml(title)}</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="toc-frame">
-<div class="toc-bar">
-<a class="toc-home" href="index.html" target="_parent">${escapeHtml(title)}</a>
-<form class="toc-search" role="search">
-<input type="search" placeholder="Rechercher un article" aria-label="Rechercher un article" autocomplete="off">
-</form>
-</div>
+<body class="toc-page">
+<header>
+<a class="brand" href="index.html">${escapeHtml(title)}</a>
+</header>
+<main class="wrap">
+<h1>Table des matières</h1>
 <nav class="toc" aria-label="Table des matières">
-${renderToc(items)}
+${renderToc(items, null, true)}
 </nav>
-<script>
-(function () {
-	var input = document.querySelector('.toc-search input');
-	var articles = Array.prototype.slice.call(document.querySelectorAll('.toc li.article'));
-	var sections = Array.prototype.slice.call(document.querySelectorAll('.toc li.section'));
-	document.querySelector('.toc-search').addEventListener('submit', function (event) { event.preventDefault(); });
-	input.addEventListener('input', function () {
-		var query = input.value.trim().toLowerCase();
-		articles.forEach(function (item) {
-			item.hidden = Boolean(query) && item.textContent.toLowerCase().indexOf(query) === -1;
-		});
-		sections.forEach(function (item) {
-			item.hidden = Boolean(query) && !item.querySelector('li.article:not([hidden])');
-		});
-	});
-})();
-</script>
+</main>
 </body>
 </html>
 `;
@@ -339,61 +352,60 @@ header h1, .doc-title { font: 600 1rem/1.3 system-ui, sans-serif; margin: 0; }
 .prose table { border-collapse: collapse; width: 100%; margin: 1em 0; font: 0.92rem/1.4 system-ui, sans-serif; }
 .prose td, .prose th { border: 1px solid #d6d3d1; padding: 0.35em 0.6em; vertical-align: top; text-align: left; }
 .prose sup, .prose sub { font-size: 0.75em; }
-.toc ul { list-style: none; margin: 0.2rem 0; padding-left: 1rem; }
-.toc > ul { padding-left: 0; }
-	.toc .section-label { display: block; margin-top: 0.85rem; font-weight: 600; color: var(--ink); }
-.toc a { text-decoration: none; }
-.toc a:hover { text-decoration: underline; }
-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-body.with-toc { display: grid; grid-template-columns: 18rem minmax(0, 1fr); min-height: 100vh; }
-.reading { min-width: 0; }
-.toc-side {
-	position: sticky; top: 0; height: 100vh;
-	border-right: 1px solid var(--line); background: #fff;
-}
-.toc-side details { height: 100%; display: flex; flex-direction: column; }
-.toc-side summary { display: none; }
-.toc-side iframe { flex: 1; width: 100%; height: 100%; border: 0; }
-body.toc-frame {
-	margin: 0; background: #fff;
-	font: 13px/1.4 system-ui, sans-serif;
-}
-.toc-bar {
-	position: sticky; top: 0; z-index: 1;
-	padding: 8px; background: #fff; border-bottom: 1px solid var(--line);
-}
-.toc-home {
-	display: block; margin-bottom: 6px;
-	font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
-	color: var(--muted); text-decoration: none;
-}
-.toc-search input {
-	width: 100%; padding: 6px 8px;
-	border: 1px solid #d6d3d1; border-radius: 4px;
-	font: inherit; color: var(--ink); background: #fff;
-}
-body.toc-frame .toc { padding: 8px 10px 2rem; }
-body.toc-frame .toc a {
-	display: block; padding: 3px 6px; border-radius: 4px;
-	color: var(--ink); scroll-margin-top: 4.5rem;
-}
-body.toc-frame .toc a:hover { background: #f1efe9; text-decoration: none; }
-body.toc-frame .toc a:target { background: #e7e5e4; font-weight: 600; }
-body.toc-frame .section-label { font-size: 11px; color: var(--muted); }
-@media (max-width: 800px) {
-	body.with-toc { display: block; }
-	body.with-toc header { position: static; }
+	.toc ul { list-style: none; margin: 0.15rem 0; padding-left: 0.75rem; }
+	.toc > ul { padding-left: 0; }
+	.toc a { color: var(--ink); text-decoration: none; }
+	.toc summary {
+		cursor: pointer;
+		font-weight: 600;
+		padding: 0.28rem 0.15rem;
+	}
+	.toc li.article a {
+		display: block;
+		padding: 0.12rem 0.35rem;
+		border-radius: 4px;
+	}
+	.toc li.article a:hover, .toc summary:hover { background: #f1efe9; }
+	.toc a[aria-current="page"] { background: #e7e5e4; font-weight: 600; }
+	footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+	body.with-toc { display: grid; grid-template-columns: 18rem minmax(0, 1fr); min-height: 100vh; }
+	.reading { min-width: 0; }
 	.toc-side {
-		position: sticky; top: 0; z-index: 3; height: auto;
-		border-right: 0; border-bottom: 1px solid var(--line);
+		position: sticky; top: 0; align-self: start;
+		height: 100vh; overflow: auto;
+		border-right: 1px solid var(--line); background: #fff;
+		font: 13px/1.4 system-ui, sans-serif;
 	}
-	.toc-side summary {
-		display: block; padding: 0.7rem 1rem; cursor: pointer;
-		font: 600 0.85rem/1.3 system-ui, sans-serif;
+	.toc-side > details > summary { display: none; }
+	.toc-home, .toc-current {
+		display: block;
+		padding: 0.7rem 0.8rem 0;
+		font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+		color: var(--muted); text-decoration: none;
 	}
-	.toc-side details { height: auto; }
-	.toc-side iframe { height: 50vh; flex: none; }
-}
+	.toc-current {
+		padding-top: 0.35rem; padding-bottom: 0.45rem;
+		border-bottom: 1px solid var(--line);
+		font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none;
+		color: var(--ink);
+	}
+	.toc-side nav.toc { padding: 0.35rem 0.55rem 2rem; }
+	body.toc-page .toc { font: 0.95rem/1.45 system-ui, sans-serif; }
+	@media (max-width: 800px) {
+		body.with-toc { display: block; }
+		body.with-toc .reading header { position: static; }
+		.toc-side {
+			position: sticky; top: 0; z-index: 3;
+			height: auto; max-height: 45vh;
+			border-right: 0; border-bottom: 1px solid var(--line);
+		}
+		.toc-side > details > summary {
+			display: block; position: sticky; top: 0; z-index: 1;
+			padding: 0.7rem 1rem; cursor: pointer;
+			background: #fff; border-bottom: 1px solid var(--line);
+			font: 600 0.85rem/1.3 system-ui, sans-serif;
+		}
+	}
 @media print {
 	header, .pager, footer, .toc-side { display: none; }
 	body, body.with-toc { display: block; background: #fff; }
@@ -496,8 +508,9 @@ ${intro ? `<div class="prose intro">${intro}</div>` : ''}
 <p class="meta"><a href="toc.html">Ouvrir la table des matières</a></p>
 ${footer(sourceUrl, rootInfo.retrieved)}
 </main>`;
-	await writeFile(path.join(siteDir, 'toc.html'), tocPage(title, analysis.root.items));
-	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody, ''));
+	const items = analysis.root.items;
+	await writeFile(path.join(siteDir, 'toc.html'), tocPage(title, items));
+	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody, renderToc(items)));
 
 	const missing = [];
 	let historyLeaks = 0;
@@ -540,10 +553,19 @@ ${prose}
 ${pager}
 ${footer(sourceUrl, rootInfo.retrieved)}
 </main>`;
-		await writeFile(path.join(siteDir, `${article.id}.html`), pageShell(`${heading} — ${title}`, body, article.id));
+		await writeFile(
+			path.join(siteDir, `${article.id}.html`),
+			pageShell(`${heading} — ${title}`, body, renderToc(items, article.id), heading, title),
+		);
 	}
 
-	const notFound = pageShell(`Introuvable — ${title}`, `<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour au code</a> · <a href="toc.html">Table des matières</a></p></main>`, '');
+	const notFound = pageShell(
+		`Introuvable — ${title}`,
+		`<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour au code</a> · <a href="toc.html">Table des matières</a></p></main>`,
+		renderToc(items),
+		'',
+		title,
+	);
 	await writeFile(path.join(siteDir, '404.html'), notFound);
 
 	const target = publishTarget(dir, options);
