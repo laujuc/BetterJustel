@@ -14,7 +14,10 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 
 # Options shared by all PDF conversions; paths are resolved from this
 # justfile's directory so the recipes work from anywhere
-pandoc-args := "--from gfm+yaml_metadata_block --pdf-engine=typst --template=\"" + (justfile_directory() / "tools/pdf/law-pdf.typ") + "\" --lua-filter=\"" + (justfile_directory() / "tools/pdf/law-pdf.lua") + "\" --metadata lang=fr"
+pdf-options := "--pdf-engine=typst --template=\"" + (justfile_directory() / "tools/pdf/law-pdf.typ") + "\" --lua-filter=\"" + (justfile_directory() / "tools/pdf/law-pdf.lua") + "\" --metadata lang=fr"
+pandoc-args := "--from gfm+yaml_metadata_block " + pdf-options
+# Fisconet Markdown has explicit article anchors (`#### Article 5/1 {#art-5-1}`)
+fisconet-pandoc-args := "--from gfm+attributes+yaml_metadata_block " + pdf-options
 
 # Convert Markdown law timelines to clean PDFs (one PDF per file)
 pdf file:
@@ -41,3 +44,22 @@ pdfs dir="laws":
 [windows]
 pdfs dir="laws":
     Get-ChildItem -Path '{{ dir }}' -Filter *.md -ErrorAction SilentlyContinue | ForEach-Object { just pdf $_.FullName }; if (-not (Get-ChildItem -Path '{{ dir }}' -Filter *.md -ErrorAction SilentlyContinue)) { Write-Error "No .md files found in '{{ dir }}'"; exit 1 }
+
+# --- FisconetPlus (SPF Finances): Code des impôts sur les revenus, TVA, ... ---
+# Requires Node.js 18+ (no npm packages) and Pandoc 3+.
+#   just fisconet-list "cir 2027"       find the GUID of a code
+#   just fisconet <guid-or-url>         download it -> fisconet/<name>/<name>.md (+ .html)
+#   just fisconet-pdf fisconet/<name>/<name>.md
+
+# List FisconetPlus documents (filter by words, e.g. "tva" or "cir revenus 2027")
+fisconet-list filter="":
+    node "{{ justfile_directory() / "tools/fisconet/fisconet.mjs" }}" list "{{ filter }}"
+
+# Download a whole code from FisconetPlus to Markdown (options: --out DIR, --name NAME, --concurrency N, --refresh, --outline, --no-markdown)
+fisconet target *options:
+    node "{{ justfile_directory() / "tools/fisconet/fisconet.mjs" }}" get "{{ target }}" {{ options }}
+
+# Convert a Fisconet Markdown file to a clean PDF
+fisconet-pdf file:
+    pandoc "{{ file }}" {{ fisconet-pandoc-args }} -o "{{ without_extension(file) }}.pdf"
+    @echo Created {{ without_extension(file) }}.pdf

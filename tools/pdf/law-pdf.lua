@@ -1,9 +1,46 @@
 -- Pandoc Lua filter for the Better Justel Typst PDF template
 --
--- - Converts the raw HTML <sup>N</sup> markers (Justel footnote references
---   without a definition) into Typst superscripts
+-- - Converts the raw HTML <sup>..</sup> and <sub>..</sub> pairs (Justel and
+--   Fisconet ordinals such as 1<sup>er</sup>, footnote markers without a
+--   definition, CO<sub>2</sub>) into real superscripts/subscripts. The Pandoc
+--   gfm reader emits the opening and closing tags as separate raw inlines.
 -- - Drops the decorative horizontal rule that precedes each version heading
 --   in the timeline: every version starts on a new page anyway
+
+function Inlines(inlines)
+	local out = pandoc.Inlines({})
+	local i = 1
+	while i <= #inlines do
+		local el = inlines[i]
+		local tag = el.t == "RawInline" and el.format == "html" and el.text:match("^<(su[pb])>$")
+		local j = i + 1
+		if tag then
+			while j <= #inlines do
+				local candidate = inlines[j]
+				if candidate.t == "RawInline" and candidate.text == "</" .. tag .. ">" then
+					break
+				end
+				j = j + 1
+			end
+		end
+		if tag and j <= #inlines then
+			local content = pandoc.Inlines({})
+			for k = i + 1, j - 1 do
+				content:insert(inlines[k])
+			end
+			if tag == "sup" then
+				out:insert(pandoc.Superscript(content))
+			else
+				out:insert(pandoc.Subscript(content))
+			end
+			i = j + 1
+		else
+			out:insert(el)
+			i = i + 1
+		end
+	end
+	return out
+end
 
 function RawInline(el)
 	if el.format == "html" then
