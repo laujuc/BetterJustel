@@ -50,6 +50,9 @@ pdfs dir="laws":
 #   just fisconet-list "cir 2027"       find the GUID of a code
 #   just fisconet <guid-or-url>         download it -> fisconet/<name>/<name>.md (+ .html)
 #   just fisconet-pdf fisconet/<name>/<name>.md
+#   just fisconet-site fisconet/<name>  minimalist HTML site -> fisconet/<name>/site/
+#   just fisconet-publish fisconet/<name>
+#                                   upload that site to pico+ pages as law-<name>
 
 # List FisconetPlus documents (filter by words, e.g. "tva" or "cir revenus 2027")
 fisconet-list filter="":
@@ -63,3 +66,11 @@ fisconet target *options:
 fisconet-pdf file:
     pandoc "{{ file }}" {{ fisconet-pandoc-args }} -o "{{ without_extension(file) }}.pdf"
     @echo Created {{ without_extension(file) }}.pdf
+
+# Build a minimalist HTML site from a downloaded Fisconet code (writes DIR/site/)
+fisconet-site dir *options:
+    node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" {{ options }}
+
+# Upload that site to pico+ pages (pgs.sh) as law-<name>. Prints the command; runs rsync when it is installed
+fisconet-publish dir *options:
+    node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" --publish {{ options }}

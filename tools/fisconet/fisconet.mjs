@@ -170,7 +170,7 @@ const yamlString = (value) => JSON.stringify(String(value));
 async function getCommand(target, options) {
 	const rootGuid = extractGuid(target);
 	const refresh = Boolean(options.refresh);
-	const concurrency = Math.max(1, Number(options.concurrency) || 4);
+	const concurrency = Math.max(1, Number(options.concurrency) || 12);
 
 	console.error(`Fetching root document ${rootGuid}...`);
 	const baseOut = path.resolve(options.out ?? 'fisconet');
@@ -283,7 +283,7 @@ const USAGE = `Usage:
 Options for "get":
   --out DIR          Output folder (default: ./fisconet); files go in DIR/<name>/
   --name NAME        Name of the sub-folder and files (default: derived from the title)
-  --concurrency N    Parallel downloads (default: 4; please stay polite)
+  --concurrency N    Parallel downloads (default: 12; measured plateau, no errors)
   --refresh          Ignore the local cache and download everything again
   --outline [full]   Only print the heading structure (no article download)
   --no-markdown      Stop after the HTML file (skip Pandoc)

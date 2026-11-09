@@ -1,13 +1,15 @@
-// In-page "Download Markdown" button for FisconetPlus document pages.
-// A code page (table of contents) downloads every article; a single document
-// downloads just that document. Parsing is shared with the command-line tool.
+// In-page tools for FisconetPlus document pages.
+// "Lecture" opens a minimalist reader (one article at a time). "Télécharger
+// en Markdown" downloads a code page in full, or just the open document.
+// Parsing is shared with the command-line tool.
 (function () {
 	"use strict";
 
 	const core = globalThis.FisconetCore;
-	const CONCURRENCY = 4;
+	const CONCURRENCY = 12;
 	const CONFIRM_FROM = 25;
 	const HOST_ID = "betterjustel-fisconet";
+	const READER_ID = "betterjustel-fisconet-reader";
 
 	if (!core || document.getElementById(HOST_ID)) return;
 
@@ -31,18 +33,23 @@
 				border: 0; border-radius: 4px; background: #0b3d91; color: #fff;
 				font: inherit; cursor: pointer;
 			}
+			button.lecture { background: #1c1917; }
 			button.secondary { background: #e7edf4; color: #17212b; }
 			button:disabled { opacity: .6; cursor: progress; }
 		</style>
 		<div class="panel">
 			<div class="brand">Better Justel</div>
 			<div class="status"></div>
+			<button type="button" class="lecture">Lecture</button>
 			<button type="button" class="primary">Télécharger en Markdown</button>
 		</div>
 	`;
 	const status = shadow.querySelector(".status");
 	const primary = shadow.querySelector(".primary");
+	const lecture = shadow.querySelector(".lecture");
 	let abort = null;
+	let reader = null;
+	let openingReader = false;
 
 	function documentGuid() {
 		const match = location.pathname.match(/\/fisconet\/document\/([0-9a-f-]{36})/i);
@@ -50,9 +57,17 @@
 	}
 
 	function syncVisibility() {
-		const visible = Boolean(documentGuid());
+		const guid = documentGuid();
+		const visible = Boolean(guid);
 		if (visible && !host.isConnected) document.documentElement.append(host);
 		if (!visible && host.isConnected && !abort) host.remove();
+		if (reader && reader.guid !== guid) closeReader();
+	}
+
+	function escapeHtml(text) {
+		return String(text).replace(/[&<>"']/g, (char) => ({
+			"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+		}[char]));
 	}
 
 	function setStatus(text) {
@@ -272,7 +287,331 @@
 		}
 	}
 
+	const READER_CSS = `
+		:host { all: initial; }
+		.overlay {
+			position: absolute; inset: 0; display: flex; flex-direction: column;
+			background: #f7f5f2; color: #1c1917;
+			font: 17px/1.6 "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+		}
+		header, aside, .pager, .hint, .crumbs, footer {
+			font-family: system-ui, sans-serif;
+		}
+		header {
+			display: flex; align-items: center; gap: 12px;
+			padding: 10px 16px; background: #fff; border-bottom: 1px solid #e7e5e4;
+		}
+		.titles { flex: 1; min-width: 0; }
+		.brand { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #57534e; }
+		.doc-title { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+		.close {
+			border: 0; border-radius: 4px; background: #1c1917; color: #fff;
+			padding: 7px 12px; font: inherit; cursor: pointer;
+		}
+		.layout { display: flex; min-height: 0; flex: 1; }
+		aside {
+			width: 300px; flex: none; overflow: auto; background: #fff;
+			border-right: 1px solid #e7e5e4; padding: 10px;
+		}
+		.search {
+			position: sticky; top: 0; z-index: 1; box-sizing: border-box;
+			width: 100%; margin-bottom: 8px; padding: 7px 8px;
+			border: 1px solid #d6d3d1; border-radius: 4px; background: #fff;
+			font: 13px/1.3 system-ui, sans-serif;
+		}
+		.sec { margin: 10px 0 2px; color: #57534e; font-size: 11px; font-weight: 650; line-height: 1.3; }
+		.art {
+			display: block; width: 100%; margin: 0; padding: 4px 6px;
+			border: 0; border-radius: 4px; background: transparent; color: #1c1917;
+			font: 13px/1.35 system-ui, sans-serif; text-align: left; cursor: pointer;
+		}
+		.art:hover, .art.current { background: #f1efe9; }
+		.art.current { font-weight: 600; }
+		main { flex: 1; overflow: auto; padding: 28px 24px 72px; }
+		.sheet { max-width: 42rem; margin: 0 auto; }
+		.pager { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+		.pager button {
+			max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+			border: 0; background: transparent; color: #1d4e89; font: 13px/1.3 system-ui, sans-serif;
+			cursor: pointer; padding: 0;
+		}
+		.pager button:disabled { color: #a8a29e; cursor: default; }
+		.hint, .crumbs, footer { color: #57534e; font-size: 13px; }
+		h1 { font-size: 1.7rem; line-height: 1.25; font-weight: 600; margin: 0 0 .8rem; }
+		p { margin: .75em 0; }
+		ul, ol { padding-left: 1.4em; }
+		a { color: #1d4e89; }
+		table { border-collapse: collapse; width: 100%; margin: 1em 0; font: .92rem/1.4 system-ui, sans-serif; }
+		td, th { border: 1px solid #d6d3d1; padding: .35em .6em; vertical-align: top; text-align: left; }
+		sup, sub { font-size: .75em; }
+		footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid #e7e5e4; }
+		.layout.single aside { display: none; }
+		.empty { color: #57534e; font-size: 13px; }
+	`;
+
+	function closeReader() {
+		if (!reader) return;
+		reader.abort.abort();
+		document.documentElement.style.overflow = reader.previousOverflow;
+		reader.host.remove();
+		reader = null;
+	}
+
+	function articleHtml(raw, article, ids) {
+		return core.sanitizeHtml(core.rewriteLinks(core.prepareArticle(raw, article.label, article.id), ids));
+	}
+
+	async function openReader() {
+		const guid = documentGuid();
+		if (!guid) return;
+		if (reader?.guid === guid) return;
+		closeReader();
+		const root = await loadDocument(guid);
+		if (documentGuid() !== guid) return;
+		if (root.type !== "HTML") {
+			throw new Error(root.type === "PDF"
+				? "Ce document est un PDF : utilisez le téléchargement."
+				: `Type non pris en charge : ${root.type}`);
+		}
+		const title = core.codeTitle(root.title);
+		const analysis = core.analyse(root.html);
+		const articles = analysis.articles.filter((article) => article.guid);
+		const idList = articles.map((article) => article.id);
+		const cache = new Map();
+		const inflight = new Map();
+		const controller = new AbortController();
+
+		const readerHost = document.createElement("div");
+		readerHost.id = READER_ID;
+		readerHost.style.cssText = "all: initial; display: block; position: fixed; inset: 0; z-index: 2147483647;";
+		const readerShadow = readerHost.attachShadow({mode: "open"});
+		readerShadow.innerHTML = `
+			<style>${READER_CSS}</style>
+			<div class="overlay">
+				<header>
+					<div class="titles">
+						<div class="brand">Better Justel · Lecture</div>
+						<div class="doc-title"></div>
+					</div>
+					<button type="button" class="close">Fermer</button>
+				</header>
+				<div class="layout">
+					<aside>
+						<input class="search" type="search" placeholder="Rechercher un article" aria-label="Rechercher un article">
+						<div class="nav"></div>
+					</aside>
+					<main>
+						<div class="sheet">
+							<div class="pager">
+								<button type="button" class="prev"></button>
+								<button type="button" class="next"></button>
+							</div>
+							<p class="crumbs" hidden></p>
+							<article class="prose"></article>
+							<footer>Texte en vigueur, sans l'historique des modifications. Vérifiez toujours le texte sur FisconetPlus.</footer>
+						</div>
+					</main>
+				</div>
+			</div>
+		`;
+		const previousOverflow = document.documentElement.style.overflow;
+		document.documentElement.style.overflow = "hidden";
+		document.documentElement.append(readerHost);
+		reader = {
+			host: readerHost,
+			guid,
+			abort: controller,
+			previousOverflow,
+			currentId: null,
+		};
+
+		const docTitle = readerShadow.querySelector(".doc-title");
+		const layout = readerShadow.querySelector(".layout");
+		const nav = readerShadow.querySelector(".nav");
+		const search = readerShadow.querySelector(".search");
+		const prose = readerShadow.querySelector(".prose");
+		const crumbs = readerShadow.querySelector(".crumbs");
+		const prev = readerShadow.querySelector(".prev");
+		const next = readerShadow.querySelector(".next");
+		const main = readerShadow.querySelector("main");
+		docTitle.textContent = title;
+		readerShadow.querySelector(".close").addEventListener("click", closeReader);
+
+		function renderNav(query) {
+			const needle = query.trim().toLowerCase();
+			const html = [];
+			const stack = [];
+			for (const item of analysis.root.items) {
+				if (item.kind === "section") {
+					while (stack.length && stack[stack.length - 1].depth >= item.depth) stack.pop();
+					stack.push(item);
+					if (!needle) {
+						html.push(`<div class="sec" style="padding-left:${(item.depth - 1) * 12}px">${escapeHtml(item.label)}</div>`);
+					}
+					continue;
+				}
+				const heading = core.articleHeadingText(item.label);
+				if (needle && !`${heading} ${item.label}`.toLowerCase().includes(needle)) continue;
+				const current = item.id === reader.currentId ? " current" : "";
+				html.push(`<button type="button" class="art${current}" data-id="${item.id}">${escapeHtml(heading)}</button>`);
+			}
+			nav.innerHTML = html.join("") || `<p class="empty">Aucun article</p>`;
+			nav.querySelector(".current")?.scrollIntoView({block: "nearest"});
+		}
+
+		function updatePager() {
+			const index = articles.findIndex((article) => article.id === reader.currentId);
+			const previous = index > 0 ? articles[index - 1] : null;
+			const following = index >= 0 ? articles[index + 1] : null;
+			prev.hidden = articles.length === 0;
+			next.hidden = articles.length === 0;
+			prev.disabled = !previous;
+			next.disabled = !following;
+			prev.textContent = previous ? `← ${core.articleHeadingText(previous.label)}` : "Précédent";
+			next.textContent = following ? `${core.articleHeadingText(following.label)} →` : "Suivant";
+			prev.dataset.id = previous?.id || "";
+			next.dataset.id = following?.id || "";
+		}
+
+		function loadArticle(article) {
+			if (cache.has(article.guid)) return Promise.resolve(cache.get(article.guid));
+			if (inflight.has(article.guid)) return inflight.get(article.guid);
+			const promise = loadDocument(article.guid, controller.signal).then((document) => {
+				if (document.type !== "HTML") throw new Error(`pas un document HTML (${document.type})`);
+				const html = articleHtml(document.html, article, analysis.ids);
+				cache.set(article.guid, html);
+				return html;
+			}).finally(() => inflight.delete(article.guid));
+			inflight.set(article.guid, promise);
+			return promise;
+		}
+
+		let shownToken = 0;
+		async function showArticle(id, fragment) {
+			const article = articles.find((item) => item.id === id);
+			if (!article || !reader) return;
+			const token = ++shownToken;
+			reader.currentId = id;
+			renderNav(search.value);
+			updatePager();
+			const path = core.sectionPath(analysis.root.items, id);
+			crumbs.hidden = path.length === 0;
+			crumbs.textContent = path.join(" · ");
+			prose.innerHTML = `<p class="hint">Chargement…</p>`;
+			main.scrollTop = 0;
+			try {
+				const html = await loadArticle(article);
+				if (token !== shownToken || !reader) return;
+				prose.innerHTML = `<h1 id="${article.id}">${escapeHtml(core.articleHeadingText(article.label))}</h1>${html}`;
+				if (fragment) scrollToFragment(fragment);
+				const index = articles.findIndex((item) => item.id === id);
+				if (articles[index + 1]) loadArticle(articles[index + 1]).catch(() => {});
+			} catch (error) {
+				if (error.name === "AbortError" || token !== shownToken) return;
+				prose.innerHTML = `<h1>${escapeHtml(core.articleHeadingText(article.label))}</h1><p>${escapeHtml(error.message)}</p>`;
+			}
+		}
+
+		function scrollToFragment(fragment) {
+			if (!fragment) return;
+			try {
+				prose.querySelector(`#${CSS.escape(fragment)}`)?.scrollIntoView({block: "start"});
+			} catch {
+				// ignore a fragment that is not a valid selector
+			}
+		}
+
+		function openFragment(fragment) {
+			if (!fragment || !reader) return false;
+			const articleId = core.articleIdFromFragment(fragment, idList);
+			if (articleId && articleId !== reader.currentId) {
+				showArticle(articleId, fragment === articleId ? null : fragment);
+				return true;
+			}
+			let target = null;
+			try {
+				target = prose.querySelector(`#${CSS.escape(fragment)}`);
+			} catch {
+				target = null;
+			}
+			if (target) {
+				target.scrollIntoView({block: "start"});
+				return true;
+			}
+			return Boolean(articleId);
+		}
+
+		readerShadow.addEventListener("click", (event) => {
+			const button = event.target.closest?.("button.art[data-id]");
+			if (button?.dataset.id) {
+				showArticle(button.dataset.id);
+				return;
+			}
+			const link = event.target.closest?.("a[href]");
+			if (!link) return;
+			const href = link.getAttribute("href") || "";
+			if (href.startsWith("#")) {
+				event.preventDefault();
+				let fragment = href.slice(1);
+				try { fragment = decodeURIComponent(fragment); } catch { /* keep */ }
+				openFragment(fragment);
+				return;
+			}
+			const linkedGuid = href.match(core.GUID_RE)?.[0]?.toLowerCase();
+			if (linkedGuid && analysis.ids.has(linkedGuid)) {
+				event.preventDefault();
+				showArticle(analysis.ids.get(linkedGuid));
+				return;
+			}
+			if (/^https?:/i.test(href)) {
+				event.preventDefault();
+				window.open(href, "_blank", "noopener");
+			}
+		});
+		search.addEventListener("input", () => renderNav(search.value));
+		prev.addEventListener("click", () => prev.dataset.id && showArticle(prev.dataset.id));
+		next.addEventListener("click", () => next.dataset.id && showArticle(next.dataset.id));
+
+		if (articles.length === 0) {
+			layout.classList.add("single");
+			const body = core.sanitizeHtml(core.prepareArticle(root.html, title, null));
+			prose.innerHTML = `<h1>${escapeHtml(title)}</h1>${body}`;
+			updatePager();
+			return;
+		}
+
+		renderNav("");
+		updatePager();
+		const intro = analysis.root.intro
+			? core.sanitizeHtml(core.rewriteLinks(analysis.root.intro, analysis.ids))
+			: "";
+		prose.innerHTML = `<p class="hint">Choisissez un article. Un seul article est téléchargé à la fois, puis conservé en mémoire.</p>${intro}`;
+		search.focus();
+	}
+
+	async function onLecture() {
+		if (openingReader) return;
+		if (reader?.guid === documentGuid()) return;
+		openingReader = true;
+		lecture.disabled = true;
+		try {
+			await openReader();
+		} catch (error) {
+			if (error.name !== "AbortError" && !abort) setStatus(error.message);
+		} finally {
+			openingReader = false;
+			lecture.disabled = false;
+		}
+	}
+
+	lecture.addEventListener("click", onLecture);
 	primary.addEventListener("click", download);
+	window.addEventListener("keydown", (event) => {
+		if (event.key === "Escape" && reader) {
+			event.preventDefault();
+			closeReader();
+		}
+	});
 	syncVisibility();
 	window.addEventListener("popstate", syncVisibility);
 	setInterval(syncVisibility, 500);

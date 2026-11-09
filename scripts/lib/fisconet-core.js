@@ -239,6 +239,40 @@
 		return /^art/i.test(label) ? label.split(",")[0].trim() : label;
 	}
 
+	// Longest article id that is the fragment, or a prefix of it followed by "-".
+	// `art-1` must not swallow `art-10` or `art-1bis`; `art-5` must not swallow `art-5-1`.
+	function articleIdFromFragment(fragment, ids) {
+		const list = [...ids].filter((id) => typeof id === "string").sort((a, b) => b.length - a.length);
+		for (const id of list) {
+			if (fragment === id || fragment.startsWith(`${id}-`)) return id;
+		}
+		return null;
+	}
+
+	function sectionPath(items, articleId) {
+		const stack = [];
+		for (const item of items) {
+			if (item.kind === "section") {
+				while (stack.length && stack[stack.length - 1].depth >= item.depth) stack.pop();
+				stack.push(item);
+			} else if (item.id === articleId) {
+				return stack.map((section) => section.label);
+			}
+		}
+		return [];
+	}
+
+	function sanitizeHtml(html) {
+		return String(html)
+			.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+			.replace(/<script\b[^>]*\/?>/gi, "")
+			.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+			.replace(/<(?:iframe|object|embed)\b[^>]*>[\s\S]*?<\/(?:iframe|object|embed)>/gi, "")
+			.replace(/<(?:iframe|object|embed)\b[^>]*\/?>/gi, "")
+			.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+			.replace(/\s(href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\2/gi, "");
+	}
+
 	function analyse(rootHtml) {
 		const root = parseRoot(cleanHtml(rootHtml));
 		const articles = root.items.filter((item) => item.kind === "article");
@@ -258,6 +292,19 @@
 		return { root, articles, articleLevel, sectionLevel, ids };
 	}
 
+	// Current text of one article, with history and in-page navigation removed.
+	function prepareArticle(rawHtml, label, id) {
+		let body = unwrapDanglingLinks(removeNavigationLinks(cleanHtml(cutHistory(rawHtml))));
+		body = dropLeadingTitle(body, articleHeadingText(label || ""));
+		if (id) {
+			body = body.replace(/\b(name|id)="([^"]+)"/gi, `id="${id}-$2"`);
+			body = body.replace(/href="#([^"]+)"/gi, (match, target) =>
+				target.startsWith("art-") ? match : `href="#${id}-${target}"`,
+			);
+		}
+		return sanitizeHtml(body);
+	}
+
 	// `bodies` maps an article GUID to its raw HTML, or to {error: "..."}.
 	function buildHtml(rootHtml, bodies) {
 		const analysis = analyse(rootHtml);
@@ -265,7 +312,7 @@
 		const lookup = (guid) => (bodies && typeof bodies.get === "function" ? bodies.get(guid) : undefined);
 		const parts = [];
 		const missing = [];
-		if (root.intro) parts.push(rewriteLinks(root.intro, ids));
+		if (root.intro) parts.push(sanitizeHtml(rewriteLinks(root.intro, ids)));
 		for (const item of root.items) {
 			if (item.kind === "section") {
 				const level = analysis.sectionLevel(item.depth);
@@ -276,13 +323,7 @@
 			const entry = item.guid ? lookup(item.guid) : undefined;
 			const html = typeof entry === "string" ? entry : entry?.html;
 			if (html) {
-				let body = unwrapDanglingLinks(removeNavigationLinks(cleanHtml(cutHistory(html))));
-				body = dropLeadingTitle(body, articleHeadingText(item.label));
-				body = body.replace(/\b(name|id)="([^"]+)"/gi, `id="${item.id}-$2"`);
-				body = body.replace(/href="#([^"]+)"/gi, (match, target) =>
-					target.startsWith("art-") ? match : `href="#${item.id}-${target}"`,
-				);
-				parts.push(rewriteLinks(body, ids));
+				parts.push(rewriteLinks(prepareArticle(html, item.label, item.id), ids));
 			} else if (entry?.error) {
 				missing.push(item.label);
 				parts.push(`<p><em>(texte indisponible : ${entry.error})</em></p>`);
@@ -299,6 +340,12 @@
 		codeTitle,
 		decodeBase64,
 		analyse,
+		prepareArticle,
+		rewriteLinks,
+		articleHeadingText,
+		articleIdFromFragment,
+		sectionPath,
+		sanitizeHtml,
 		buildHtml,
 	};
 });
