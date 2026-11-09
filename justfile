@@ -8,8 +8,9 @@
 # The recipes are OS-agnostic: on Linux and macOS they run with sh,
 # on Windows with PowerShell (bash is not needed).
 
-# Use PowerShell on Windows (available on every Windows installation)
-set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+# Use PowerShell 7 on Windows (pwsh; https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
+# Windows PowerShell 5.1 also works: replace pwsh.exe with powershell.exe
+set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 
 # Options shared by all PDF conversions; paths are resolved from this
 # justfile's directory so the recipes work from anywhere
