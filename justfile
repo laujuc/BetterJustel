@@ -67,7 +67,7 @@ fisconet-pdf file:
     pandoc "{{ file }}" {{ fisconet-pandoc-args }} -o "{{ without_extension(file) }}.pdf"
     @echo Created {{ without_extension(file) }}.pdf
 
-# Build a minimalist HTML site from a downloaded Fisconet code (writes DIR/site/)
+# Build a minimalist HTML site from a downloaded Fisconet code (writes DIR/site/, with a TOC sidebar)
 fisconet-site dir *options:
     node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" {{ options }}
 

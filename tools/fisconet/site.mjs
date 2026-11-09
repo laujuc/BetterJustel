@@ -3,9 +3,11 @@
 //
 //   node tools/fisconet/site.mjs <downloaded-dir> [--publish]
 //
-// Writes <dir>/site/index.html, one HTML page per article, style.css, and a
-// copy of the Markdown file when it exists. Article links become art-<id>.html
-// (pico+ pages also serves that URL without the extension).
+// Writes <dir>/site/index.html, one HTML page per article, style.css, a shared
+// sidebar table of contents (toc.html), and a copy of the Markdown file when it
+// exists. Article links become art-<id>.html (pico+ pages also serves that URL
+// without the extension). The sidebar is one file framed into every page, so a
+// code of several hundred articles is not copied into each page.
 //
 // pico+ pages (pgs.sh) is a static-file host, not a Markdown CMS, so the
 // readable site is HTML. Every code is uploaded into the same project, as a
@@ -175,7 +177,7 @@ function renderToc(items) {
 			stack.push(item.depth);
 		} else {
 			const heading = core.articleHeadingText(item.label);
-			parts.push(`<li><a href="${item.id}.html">${escapeHtml(heading)}</a></li>`);
+			parts.push(`<li class="article"><a id="${item.id}" href="${item.id}.html" target="_parent">${escapeHtml(heading)}</a></li>`);
 		}
 	}
 	closeTo(0);
@@ -213,7 +215,15 @@ function retarget(html, currentId, idSet, idByGuid) {
 	return out;
 }
 
-function pageShell(title, body) {
+// tocHash: article id to highlight, '' for the index, null to omit the sidebar
+// (toc.html must not frame itself).
+function pageShell(title, body, tocHash = '') {
+	const sidebar = tocHash === null ? '' : `<aside class="toc-side">
+<details open>
+<summary>Table des matières</summary>
+<iframe src="toc.html${tocHash ? `#${tocHash}` : ''}" title="Table des matières"></iframe>
+</details>
+</aside>`;
 	return `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -222,8 +232,52 @@ function pageShell(title, body) {
 <title>${escapeHtml(title)}</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body class="${sidebar ? 'with-toc' : ''}">
+${sidebar}
+<div class="reading">
 ${body}
+</div>
+</body>
+</html>
+`;
+}
+
+function tocPage(title, items) {
+	return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Table des matières — ${escapeHtml(title)}</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="toc-frame">
+<div class="toc-bar">
+<a class="toc-home" href="index.html" target="_parent">${escapeHtml(title)}</a>
+<form class="toc-search" role="search">
+<input type="search" placeholder="Rechercher un article" aria-label="Rechercher un article" autocomplete="off">
+</form>
+</div>
+<nav class="toc" aria-label="Table des matières">
+${renderToc(items)}
+</nav>
+<script>
+(function () {
+	var input = document.querySelector('.toc-search input');
+	var articles = Array.prototype.slice.call(document.querySelectorAll('.toc li.article'));
+	var sections = Array.prototype.slice.call(document.querySelectorAll('.toc li.section'));
+	document.querySelector('.toc-search').addEventListener('submit', function (event) { event.preventDefault(); });
+	input.addEventListener('input', function () {
+		var query = input.value.trim().toLowerCase();
+		articles.forEach(function (item) {
+			item.hidden = Boolean(query) && item.textContent.toLowerCase().indexOf(query) === -1;
+		});
+		sections.forEach(function (item) {
+			item.hidden = Boolean(query) && !item.querySelector('li.article:not([hidden])');
+		});
+	});
+})();
+</script>
 </body>
 </html>
 `;
@@ -291,9 +345,58 @@ header h1, .doc-title { font: 600 1rem/1.3 system-ui, sans-serif; margin: 0; }
 .toc a { text-decoration: none; }
 .toc a:hover { text-decoration: underline; }
 footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+body.with-toc { display: grid; grid-template-columns: 18rem minmax(0, 1fr); min-height: 100vh; }
+.reading { min-width: 0; }
+.toc-side {
+	position: sticky; top: 0; height: 100vh;
+	border-right: 1px solid var(--line); background: #fff;
+}
+.toc-side details { height: 100%; display: flex; flex-direction: column; }
+.toc-side summary { display: none; }
+.toc-side iframe { flex: 1; width: 100%; height: 100%; border: 0; }
+body.toc-frame {
+	margin: 0; background: #fff;
+	font: 13px/1.4 system-ui, sans-serif;
+}
+.toc-bar {
+	position: sticky; top: 0; z-index: 1;
+	padding: 8px; background: #fff; border-bottom: 1px solid var(--line);
+}
+.toc-home {
+	display: block; margin-bottom: 6px;
+	font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+	color: var(--muted); text-decoration: none;
+}
+.toc-search input {
+	width: 100%; padding: 6px 8px;
+	border: 1px solid #d6d3d1; border-radius: 4px;
+	font: inherit; color: var(--ink); background: #fff;
+}
+body.toc-frame .toc { padding: 8px 10px 2rem; }
+body.toc-frame .toc a {
+	display: block; padding: 3px 6px; border-radius: 4px;
+	color: var(--ink); scroll-margin-top: 4.5rem;
+}
+body.toc-frame .toc a:hover { background: #f1efe9; text-decoration: none; }
+body.toc-frame .toc a:target { background: #e7e5e4; font-weight: 600; }
+body.toc-frame .section-label { font-size: 11px; color: var(--muted); }
+@media (max-width: 800px) {
+	body.with-toc { display: block; }
+	body.with-toc header { position: static; }
+	.toc-side {
+		position: sticky; top: 0; z-index: 3; height: auto;
+		border-right: 0; border-bottom: 1px solid var(--line);
+	}
+	.toc-side summary {
+		display: block; padding: 0.7rem 1rem; cursor: pointer;
+		font: 600 0.85rem/1.3 system-ui, sans-serif;
+	}
+	.toc-side details { height: auto; }
+	.toc-side iframe { height: 50vh; flex: none; }
+}
 @media print {
-	header, .pager, footer { display: none; }
-	body { background: #fff; }
+	header, .pager, footer, .toc-side { display: none; }
+	body, body.with-toc { display: block; background: #fff; }
 	.wrap { max-width: none; }
 }
 `;
@@ -390,12 +493,11 @@ async function build(dir, options) {
 <p class="meta">${articles.length} articles · <a href="${escapeHtml(sourceUrl)}">Source FisconetPlus</a></p>
 ${download}
 ${intro ? `<div class="prose intro">${intro}</div>` : ''}
-<nav class="toc" aria-label="Table des matières">
-${renderToc(analysis.root.items)}
-</nav>
+<p class="meta"><a href="toc.html">Ouvrir la table des matières</a></p>
 ${footer(sourceUrl, rootInfo.retrieved)}
 </main>`;
-	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody));
+	await writeFile(path.join(siteDir, 'toc.html'), tocPage(title, analysis.root.items));
+	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody, ''));
 
 	const missing = [];
 	let historyLeaks = 0;
@@ -426,7 +528,7 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 		}</nav>`;
 		const body = `<header>
 <a class="brand" href="index.html">${escapeHtml(title)}</a>
-<a href="index.html">Table des matières</a>
+<a href="toc.html">Table des matières</a>
 </header>
 <main class="wrap">
 ${crumbs.length ? `<p class="crumbs">${crumbs.map(escapeHtml).join(' · ')}</p>` : ''}
@@ -438,10 +540,10 @@ ${prose}
 ${pager}
 ${footer(sourceUrl, rootInfo.retrieved)}
 </main>`;
-		await writeFile(path.join(siteDir, `${article.id}.html`), pageShell(`${heading} — ${title}`, body));
+		await writeFile(path.join(siteDir, `${article.id}.html`), pageShell(`${heading} — ${title}`, body, article.id));
 	}
 
-	const notFound = pageShell(`Introuvable — ${title}`, `<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour à la table des matières</a></p></main>`);
+	const notFound = pageShell(`Introuvable — ${title}`, `<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour au code</a> · <a href="toc.html">Table des matières</a></p></main>`, '');
 	await writeFile(path.join(siteDir, '404.html'), notFound);
 
 	const target = publishTarget(dir, options);
