@@ -93,22 +93,6 @@ window.BJ.exportModule = function(ctx) {
 		return numeric ? `${numeric[3]}-${numeric[2]}-${numeric[1]}` : undefined;
 	}
 
-	function extractVersionDates(doc) {
-		const history = doc.querySelector("#list-title-sw_mr")
-			|| Array.from(doc.querySelectorAll("div.box"))
-				.find(box => /modification|wijziging/i.test(box.querySelector("h2")?.textContent || ""));
-		if (!history) { return {}; }
-		const dates = {};
-		for (const entry of history.innerHTML.split(/_{10,}/)) {
-			const archives = Array.from(entry.matchAll(/(?:amp;|[?&])arch=(\d+)/g));
-			const effectiveDates = Array.from(entry.matchAll(/(?:En vigueur jusqu['’]au|Van kracht tot)\s*(\d{2})-(\d{2})-(\d{4})/gi));
-			if (!archives.length || !effectiveDates.length) { continue; }
-			const archiveVersion = Number(archives[archives.length - 1][1]);
-			const match = effectiveDates[effectiveDates.length - 1];
-			dates[archiveVersion + 1] = `${match[3]}-${match[2]}-${match[1]}`;
-		}
-		return dates;
-	}
 
 	// ---------------------------------------------------------------------------
 	// HTML to Markdown conversion
@@ -484,7 +468,7 @@ window.BJ.exportModule = function(ctx) {
 
 	function lawHtmlToMarkdown(doc) {
 		const content = doc.querySelector("#list-title-3");
-		if (!content) { throw new Error("The archived Justel version has no law text"); }
+		if (!content) { throw new Error("The Justel page has no law text"); }
 		content.querySelector("h2")?.remove();
 		const blocks = buildBlocks(content);
 		assignHeadingLevels(blocks);
@@ -503,45 +487,35 @@ window.BJ.exportModule = function(ctx) {
 			.trim();
 	}
 
-	function extractVersionNote(doc) {
-		const note = doc.querySelector("#list-title-note");
-		if (!note) { return undefined; }
-		note.querySelector("h2")?.remove();
-		const markdown = getTurndownService().turndown(note).trim();
-		const quoted = markdown.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-		return quoted.length ? quoted.map(line => `> ${line}`).join("\n") : undefined;
-	}
 
 	function yamlString(value) {
 		return JSON.stringify(String(value || ""));
 	}
 
-	function makeMarkdown(snapshots) {
-		const title = snapshots[snapshots.length - 1]?.title || ctx.act.fullTitle;
+	function makeMarkdown(act) {
+		const title = act.title || ctx.act.fullTitle;
 		const lines = [
 			"---",
 			`numac: ${yamlString(ctx.act.numac)}`,
 			`title: ${yamlString(title)}`,
 			`eli: ${yamlString(ctx.act.eli)}`,
-			"source: Justel archived versions",
-			"history: Reconstructed snapshots; this is not a Git repository history",
+			`consolidated: ${yamlString(act.date || "")}`,
+			"source: Justel consolidated text",
 			"---",
 			"",
 			`# ${title}`,
 			"",
-			`ELI: ${ctx.act.eli}`,
-			"",
 		];
-		for (const snapshot of snapshots) {
-			lines.push(
-				`## Version ${snapshot.version}/${snapshot.total}${snapshot.date ? ` — ${snapshot.date}` : ""}`,
-				"",
-				`Source: ${snapshot.url}`,
-				"",
-			);
-			if (snapshot.note) { lines.push(snapshot.note, ""); }
-			lines.push(snapshot.markdown, "", "---", "");
+		if (act.date) {
+			lines.push(`Consolidated text as of ${act.date}.`, "");
 		}
+		if (ctx.act.eli) {
+			lines.push(`ELI: ${ctx.act.eli}`, "");
+		}
+		if (act.url) {
+			lines.push(`Source: ${act.url}`, "");
+		}
+		lines.push(act.markdown, "");
 		return lines.join("\n");
 	}
 
@@ -621,8 +595,7 @@ window.BJ.exportModule = function(ctx) {
 				flushParagraph();
 				const h = doc.createElement(`h${heading[1].length}`);
 				appendInlineMarkdown(h, heading[2], doc);
-				if (/^Version\s/.test(heading[2])) { h.classList.add("version"); }
-				container.append(h);
+					container.append(h);
 				continue;
 			}
 			if (line.trim() === "---") {
@@ -663,19 +636,19 @@ window.BJ.exportModule = function(ctx) {
 	}
 
 	function safeFilename(title) {
-		return (title || "law-timeline").replace(/[\\/:*?"<>|]/g, "_").trim() || "law-timeline";
+		return (title || "law").replace(/[\\/:*?"<>|]/g, "_").trim() || "law";
 	}
 
 	function showProgress(popup, message) {
-		if (!popup || popup.closed) { throw new Error("Timeline export was cancelled"); }
+		if (!popup || popup.closed) { throw new Error("Export was cancelled"); }
 		popup.document.querySelector("#export-status").textContent = message;
 	}
 
 	function preparePopup(popup) {
-		if (!popup || popup.closed) { throw new Error("Could not open the timeline export window"); }
+		if (!popup || popup.closed) { throw new Error("Could not open the export window"); }
 		const doc = popup.document;
 		doc.open();
-		doc.write("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Law timeline export</title></head><body></body></html>");
+		doc.write("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Consolidated law export</title></head><body></body></html>");
 		doc.close();
 		const style = doc.createElement("style");
 		style.textContent = `
@@ -686,7 +659,7 @@ window.BJ.exportModule = function(ctx) {
 			main { overflow-wrap: anywhere; }
 			h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin-top: 1.4em; }
 			h1 { font-size: 1.7rem; }
-			h2.version { break-before: page; border-bottom: 1px solid #dce3ea; padding-bottom: .3em; }
+			h2 { border-bottom: 1px solid #dce3ea; padding-bottom: .3em; }
 			p { margin: .45em 0 1em; white-space: pre-wrap; }
 			hr { margin: 2rem 0; border: 0; border-top: 1px solid #dce3ea; }
 			blockquote { margin: .8em 0; padding: .4em 1em; border-left: 3px solid #dce3ea; color: #526273; }
@@ -702,7 +675,7 @@ window.BJ.exportModule = function(ctx) {
 		controls.id = "controls";
 		const status = doc.createElement("span");
 		status.id = "export-status";
-		status.textContent = "Preparing timeline…";
+		status.textContent = "Preparing the consolidated text…";
 		controls.append(status);
 		doc.body.append(controls);
 		return doc;
@@ -712,7 +685,7 @@ window.BJ.exportModule = function(ctx) {
 		const doc = popup.document;
 		const controls = doc.querySelector("#controls");
 		const status = doc.querySelector("#export-status");
-		status.textContent = "Timeline ready. Use Print / Save PDF to create the PDF.";
+		status.textContent = "Consolidated text ready. Use Print / Save PDF to create the PDF.";
 		const download = doc.createElement("button");
 		download.textContent = "Download Markdown";
 		download.addEventListener("click", function() {
@@ -737,50 +710,34 @@ window.BJ.exportModule = function(ctx) {
 		doc.title = safeFilename(ctx.act.fullTitle);
 	}
 
-	async function exportTimeline(popup) {
+	async function exportConsolidated(popup) {
 		const doc = preparePopup(popup);
 		try {
 			if (!ctx.act.numac) { throw new Error("The selected act has no NUMAC identifier"); }
-			showProgress(popup, "Finding archived versions on Justel…");
+			showProgress(popup, "Finding the consolidated text on Justel…");
 			const discoveryResponse = await fetch(makeDiscoveryUrl(), {credentials: "include"});
 			if (!discoveryResponse.ok) { throw new Error(`Justel returned HTTP ${discoveryResponse.status}`); }
 			const discoveryDoc = new DOMParser().parseFromString(await readJustelHtml(discoveryResponse), "text/html");
 			const cn = extractCn(discoveryDoc);
-			const archivedCount = extractVersionCount(discoveryDoc);
-			const versionDates = extractVersionDates(discoveryDoc);
-			const total = Math.max(archivedCount, 1);
-			const snapshots = [];
-
-			for (let version = 1; version <= total; version++) {
-				if (version > 1) { await new Promise(resolve => setTimeout(resolve, 1000)); }
-				showProgress(popup, `Fetching Justel version ${version} of ${total}…`);
-				const url = buildVersionUrl(cn, version, total);
-				const response = await fetch(url, {credentials: "include"});
-				if (!response.ok) { throw new Error(`Justel returned HTTP ${response.status} for version ${version}`); }
-				const versionDoc = new DOMParser().parseFromString(await readJustelHtml(response), "text/html");
-				if (!versionDoc.querySelector("#list-title-3")) {
-					throw new Error(`Justel did not return the law text for version ${version}`);
-				}
-				const versionDate = version === 1
-					? ctx.act.date
-					: version === total
-						? ctx.act.lastUpdate
-						: versionDates[version] || extractUpdateDate(versionDoc);
-				snapshots.push({
-					version,
-					total,
-					date: versionDate,
-					url,
-					title: extractFullTitle(versionDoc),
-					note: extractVersionNote(versionDoc),
-					markdown: lawHtmlToMarkdown(versionDoc),
-				});
+			const total = Math.max(extractVersionCount(discoveryDoc), 1);
+			// The highest version number is the text in force: Justel omits arch for it.
+			const url = buildVersionUrl(cn, total, total);
+			showProgress(popup, "Fetching the consolidated text…");
+			const response = await fetch(url, {credentials: "include"});
+			if (!response.ok) { throw new Error(`Justel returned HTTP ${response.status}`); }
+			const versionDoc = new DOMParser().parseFromString(await readJustelHtml(response), "text/html");
+			if (!versionDoc.querySelector("#list-title-3")) {
+				throw new Error("Justel did not return the consolidated law text");
 			}
-
-			if (!snapshots.length) { throw new Error("Justel did not return any versions for this act"); }
-			const markdown = makeMarkdown(snapshots);
+			const date = extractUpdateDate(versionDoc) || ctx.act.lastUpdate;
+			const markdown = makeMarkdown({
+				date,
+				url,
+				title: extractFullTitle(versionDoc) || ctx.act.fullTitle,
+				markdown: lawHtmlToMarkdown(versionDoc),
+			});
 			presentMarkdown(popup, markdown);
-			console.info(`[betterlaws] Prepared Markdown timeline for ${ctx.act.numac} (${snapshots.length} versions)`);
+			console.info(`[betterlaws] Prepared consolidated Markdown for ${ctx.act.numac} (${date || "undated"})`);
 		}
 		catch (error) {
 			if (!popup.closed) {
@@ -793,5 +750,5 @@ window.BJ.exportModule = function(ctx) {
 		}
 	}
 
-	return {exportTimeline, lawHtmlToMarkdown};
+	return {exportConsolidated, lawHtmlToMarkdown};
 };

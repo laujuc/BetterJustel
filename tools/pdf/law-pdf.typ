@@ -1,4 +1,4 @@
-// Pandoc/Typst template producing a clean PDF of a Justel law timeline
+// Pandoc/Typst template producing a clean PDF of a consolidated law text
 // exported by betterlaws. See the "pdf" recipe of the justfile.
 
 $if(title)$
@@ -10,10 +10,6 @@ $endif$
 // "#divider()" (a function call) from pandoc 3.11 on — define both
 #let horizontalrule = line(start: (30%, 0%), end: (70%, 0%), stroke: 0.5pt + luma(160))
 #let divider = () => horizontalrule
-
-// Every archived version starts on a new page, except the first one which
-// follows the title on the opening page
-#let versionCount = counter("bj-version")
 
 #set page(
   paper: "a4",
@@ -34,17 +30,12 @@ $endif$
 
 #show heading: set text(font: "Libertinus Serif", fill: luma(30))
 #show heading.where(level: 1): set text(size: 15.5pt)
-#show heading.where(level: 2): it => context {
-  versionCount.step()
-  if versionCount.get().at(0) > 1 { pagebreak(weak: true) }
-  block(above: 1.1em, below: 0.7em)[#it]
-}
+#show heading.where(level: 2): set text(size: 13pt)
 #show heading.where(level: 3): set text(size: 11.5pt)
 #show heading.where(level: 4): set text(size: 10.8pt)
 #show heading.where(level: 5): set text(size: 10.5pt)
 #show heading.where(level: 6): set text(size: 10.5pt)
 
-// Version notes (what each snapshot modified, until when it was in force)
 #show quote: it => block(
   above: 1.1em,
   below: 1.1em,

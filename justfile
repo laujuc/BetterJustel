@@ -1,7 +1,7 @@
 # betterlaws — offline tooling
 #
-# The extension exports law timelines as Markdown ("Timeline (MD/PDF)" >
-# Download Markdown). These recipes turn the exported Markdown into clean
+# The extension exports the consolidated law text as Markdown
+# ("Consolidated (MD/PDF)" > Download Markdown). These recipes turn that Markdown into clean
 # typeset PDFs with Pandoc and Typst (both must be installed:
 # https://pandoc.org and https://typst.app, or your distribution packages).
 #
@@ -19,7 +19,7 @@ pandoc-args := "--from gfm+yaml_metadata_block " + pdf-options
 # Fisconet Markdown has explicit article anchors (`#### Article 5/1 {#art-5-1}`)
 fisconet-pandoc-args := "--from gfm+attributes+yaml_metadata_block " + pdf-options
 
-# Convert Markdown law timelines to clean PDFs (one PDF per file)
+# Convert a consolidated Markdown law text to a clean PDF
 pdf file:
     pandoc "{{ file }}" {{ pandoc-args }} -o "{{ without_extension(file) }}.pdf"
     @echo Created {{ without_extension(file) }}.pdf

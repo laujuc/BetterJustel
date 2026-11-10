@@ -4,8 +4,8 @@
 --   Fisconet ordinals such as 1<sup>er</sup>, footnote markers without a
 --   definition, CO<sub>2</sub>) into real superscripts/subscripts. The Pandoc
 --   gfm reader emits the opening and closing tags as separate raw inlines.
--- - Drops the decorative horizontal rule that precedes each version heading
---   in the timeline: every version starts on a new page anyway
+-- - Drops a horizontal rule that older timeline exports placed before each
+--   version heading. Current exports are one consolidated text and do not emit it.
 
 function Inlines(inlines)
 	local out = pandoc.Inlines({})
@@ -60,7 +60,7 @@ function Pandoc(doc)
 			and nextBlock.level == 2
 		local lastBlock = i == #doc.blocks
 		if block.t == "HorizontalRule" and (beforeVersion or lastBlock) then
-			-- skip: the page break already separates the versions
+			-- skip: leftover separator from an older timeline export
 		else
 			kept[#kept + 1] = block
 		end

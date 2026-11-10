@@ -185,19 +185,19 @@ window.BJ.displayModule = function(ctx) {
 		}
 	}
 
-	function setupTimelineExport() {
+	function setupMarkdownExport() {
 		const info = document.querySelector("div#info");
 		const actions = info?.querySelector("#addinfodiv");
 		if (!actions) { return; }
-		let link = actions.querySelector("a#btnExportTimeline");
+		let link = actions.querySelector("a#btnExportMarkdown");
 		if (!link) {
 			const span = document.createElement("span");
 			span.classList.add("act-header__action");
 			link = document.createElement("a");
-			link.id = "btnExportTimeline";
+			link.id = "btnExportMarkdown";
 			link.href = "#";
 			link.classList.add("act-header__button");
-			link.textContent = "Timeline (MD/PDF)";
+			link.textContent = "Consolidated (MD/PDF)";
 			span.append(link);
 			actions.append(span);
 		}
@@ -209,12 +209,12 @@ window.BJ.displayModule = function(ctx) {
 			event.preventDefault();
 			const popup = window.open("", "_blank");
 			if (!popup) {
-				ctx.showStatusMessage("Allow pop-ups to export the law timeline");
+				ctx.showStatusMessage("Allow pop-ups to export the consolidated text");
 				return;
 			}
-			ctx.exportTimeline(popup).catch(error => {
-				console.error("[betterlaws] Could not export law timeline:", error.message);
-				ctx.showStatusMessage(`Could not export law timeline: ${error.message}`);
+			ctx.exportConsolidated(popup).catch(error => {
+				console.error("[betterlaws] Could not export the consolidated text:", error.message);
+				ctx.showStatusMessage(`Could not export the consolidated text: ${error.message}`);
 			});
 		});
 	}
@@ -318,7 +318,7 @@ window.BJ.displayModule = function(ctx) {
 		normalizeInfoLinks();
 		setupCopyEli();
 		enhanceInfoPanel();
-		setupTimelineExport();
+		setupMarkdownExport();
 		$("div#info a#btnSavePDF").on("click", function (event, date) {
 			let a = document.createElement("a");
 			a.style = "display: none";
