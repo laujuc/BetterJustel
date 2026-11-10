@@ -1,7 +1,12 @@
 const DROPBOX_CLIENT_ID = "bxh6gtfvn361dbe";
 const DROPBOX_REDIRECT_URL = "https://www.ejustice.just.fgov.be/eli/";
 const PCLOUD_REDIRECT_URL = "https://www.ejustice.just.fgov.be/eli/";
-const PCLOUD_APP_REGISTRATION_URL = "https://my.pcloud.com/#page=apps";
+// pCloud rejects OAuth without a client_id. There is no app-less flow, and a
+// client secret cannot live in an extension. Implicit grant (token in the
+// fragment) needs this id once, with redirect URI PCLOUD_REDIRECT_URL.
+// Leave it empty rather than inventing one. rclone's public id cannot be
+// reused: its redirect is localhost, not this page.
+const PCLOUD_CLIENT_ID = "";
 
 import {getStorage, setStorage, getAllHighlights, requestDataCollectionPermissions} from "../scripts/util.js";
 import {parseJustelQuery, buildJustelSearchUrl} from "../scripts/popup-search.js";
@@ -198,25 +203,19 @@ async function toggleDropboxBackup() {
 	}
 }
 
-// pCloud does not support the PKCE-less code flow of Dropbox: the token
-// exchange requires a client secret, which cannot be kept hidden in a
-// browser extension. The implicit flow is used instead: the access token
-// is returned directly in the redirect URL fragment. Each user must register
-// their own pCloud application once to obtain a client ID.
+// Implicit OAuth: the access token comes back in the redirect fragment, so
+// no client secret is stored. pCloud still requires a client_id.
 async function getPcloudClientId() {
-	let clientId = await getStorage("pcloudClientId");
-	if (clientId?.trim()) { return clientId.trim(); }
-	clientId = prompt(
-		`Backups to pCloud require a pCloud application of your own.\n\n`
-		+ `1. Register an application on ${PCLOUD_APP_REGISTRATION_URL} (choose the OAuth 2.0 API);\n`
-		+ `2. Set its redirect URI to ${PCLOUD_REDIRECT_URL};\n`
-		+ `3. Enter the Client ID of the application below.`,
-		""
+	if (PCLOUD_CLIENT_ID.trim()) { return PCLOUD_CLIENT_ID.trim(); }
+	const stored = await getStorage("pcloudClientId");
+	if (stored?.trim()) { return stored.trim(); }
+	alert(
+		"pCloud refuses OAuth without a client id. There is no connect-without-an-app flow.\n\n"
+		+ "Set PCLOUD_CLIENT_ID in scripts/popup.js to an id whose redirect URI is "
+		+ PCLOUD_REDIRECT_URL
+		+ ". Do not put a client secret in the extension."
 	);
-	if (!clientId?.trim()) { return undefined; }
-	clientId = clientId.trim();
-	await setStorage("pcloudClientId", clientId);
-	return clientId;
+	return undefined;
 }
 
 async function togglePcloudBackup() {
@@ -236,7 +235,7 @@ async function togglePcloudBackup() {
 	const clientId = await getPcloudClientId();
 	if (!clientId) { return; }
 	if (!await requestBackupFilename(highlightsBackup)) { return; }
-	alert("You will now be redirected to authorize this app to access your pCloud. Access will be granted to your full pCloud storage; backups are stored in the 'betterlaws' folder. An existing 'BetterJustel' folder is renamed to 'betterlaws' on the next backup. Backups of your highlights will be made daily.");
+	alert("You will now be redirected to authorize access to your pCloud. Access covers the whole storage. Highlights are stored in the 'betterlaws' folder, and each consulted act version is stored under 'betterlaws/laws'. An existing 'BetterJustel' folder is renamed to 'betterlaws' on the next backup.");
 	highlightsBackup.provider = "pcloud";
 	highlightsBackup.redirect = "https://www.ejustice.just.fgov.be/loi/loi.htm";
 	await setStorage("highlightsBackup", highlightsBackup);

@@ -3,44 +3,57 @@
 //
 //   node tools/fisconet/site.mjs <downloaded-dir> [--publish]
 //
-// Writes <dir>/site/index.html, one HTML page per article, style.css, a
+// Writes <dir>/site/index.html, one HTML page per article, site.css, a
 // standalone toc.html, and a copy of the Markdown file when it exists. Article
 // links become art-<id>.html (pico+ pages also serves that URL without the
 // extension). The sidebar is inlined HTML and CSS: pgs sends
 // X-Frame-Options: DENY, so an iframe of toc.html is refused. No script.
+// Pages use the pico.sh stylesheets (absolute URLs) plus a small site.css.
 //
 // pico+ pages (pgs.sh) is a static-file host, not a Markdown CMS, so the
 // readable site is HTML. Every code is uploaded into the same project, as a
 // subdirectory, so one site holds all of them:
 //
-//   rsync -rtv --delete ".../cir-92-revenus-2027/site/" pgs.sh:/laws/cir-92-revenus-2027/
-//   https://ljuc-laws.pgs.sh/cir-92-revenus-2027/
+//   https://ljuc-laws.pgs.sh/cir92/
+//   mounted at ~/pgs.sh/laws/cir92/   (sshfs of pgs.sh:/laws, project "laws")
 //
-// SSH upload is always to pgs.sh. ljuc-laws.pgs.sh is the public hostname of
-// the `laws` project, not an rsync host. --delete applies only to that code's
-// subdirectory, so other codes under /laws/ are left in place. --publish runs
-// rsync when it is installed; otherwise it prints an scp command.
+// ljuc-laws.pgs.sh is the public hostname of user ljuc + project laws. It is
+// not a folder named ljuc-laws (that name would be a different project, at
+// https://ljuc-ljuc-laws.pgs.sh). --delete applies only to that code's
+// subdirectory. The welcome index is written on its own, never with --delete
+// on /laws/, or it would wipe the codes.
 //
 // Requires Node.js 18+. No npm dependencies. Works the same on Windows
 // (PowerShell) and Unix: it is a Node script, not a shell script.
 
 import { createRequire } from 'node:module';
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const core = createRequire(import.meta.url)('../../scripts/lib/fisconet-core.js');
 
 const PICO_USER = 'ljuc';
 const PICO_PROJECT = 'laws';
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const PICO_CSS = 'https://pico.sh/smol.css?v=6618';
+const PICO_MAIN = 'https://pico.sh/main.css?v=6618';
+
 const USAGE = `Usage:
-  site.mjs <downloaded-dir> [--publish] [--project laws] [--user ljuc]
+  site.mjs <downloaded-dir> [--publish] [--project laws] [--user ljuc] [--mount DIR]
+  site.mjs --index [--publish] [--project laws] [--mount DIR]
 
   <downloaded-dir>   A folder created by \`just fisconet\` (contains raw/ and usually a .md file)
   --project NAME     pico+ project (default: laws). Each code is a subdirectory.
   --user NAME        pico username used in the public URL (default: ljuc)
-  --publish          Upload site/ to pgs.sh:/laws/<folder>/ with rsync when rsync is installed
+  --mount DIR        Home-folder mount of pgs.sh:/ (default: ~/pgs.sh)
+  --publish          Copy site/ into the mount at <mount>/<project>/<folder>/ when that
+                     directory exists; otherwise rsync to pgs.sh:/<project>/<folder>/
+  --index            Write the welcome page (index.html) for the project root.
+                     Never deletes code folders.
 
 The site is always written to <downloaded-dir>/site/ before any upload.
 Public URL: https://ljuc-laws.pgs.sh/<folder>/
@@ -82,9 +95,11 @@ function parseArguments(argv) {
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		if (arg === '--publish') options.publish = true;
+		else if (arg === '--index') options.index = true;
 		else if (arg === '--help' || arg === '-h') options.help = true;
 		else if (arg === '--project') options.project = argv[++i];
 		else if (arg === '--user') options.user = argv[++i];
+		else if (arg === '--mount') options.mount = argv[++i];
 		else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
 		else positional.push(arg);
 	}
@@ -237,63 +252,63 @@ function retarget(html, currentId, idSet, idByGuid) {
 	return out;
 }
 
-// tocHtml is the inlined list. null omits the sidebar (the standalone toc page).
-// homeLabel is the short name in the sidebar; title is the document title.
-function pageShell(title, body, tocHtml = null, currentLabel = '', homeLabel = '') {
-	const here = currentLabel
-		? `<a class="toc-current" href="#current">${escapeHtml(currentLabel)}</a>`
-		: '';
-	const home = homeLabel || title;
-	const sidebar = tocHtml == null ? '' : `<aside class="toc-side">
-<details open>
-<summary>Table des matières</summary>
-<a class="toc-home" href="index.html">${escapeHtml(home)}</a>
-${here}
+function displayTitle(title) {
+	return String(title || '')
+		.replace(/\s*-\s*Table des matières\s*$/i, '')
+		.replace(/^Table des matières\s*-\s*/i, '')
+		.trim();
+}
+
+function headNav(codes, currentSlug) {
+	const home = currentSlug ? '' : ' aria-current="page"';
+	const links = [`<a class="link-alt"${home} href="/">Accueil</a>`];
+	for (const code of codes) {
+		const current = code.slug === currentSlug ? ' aria-current="page"' : '';
+		links.push(`<a class="link-alt"${current} href="/${escapeHtml(code.slug)}/">${escapeHtml(code.title)}</a>`);
+	}
+	return `<nav class="mk-nav flex flex-wrap items-center gap mono" aria-label="Codes">\n${links.join('\n')}\n</nav>`;
+}
+
+// tocHtml is the inlined list. null omits the sidebar (welcome page, full outline).
+function pageShell({ title, body, tocHtml = null, codes = [], currentSlug = '', homeLabel = '' }) {
+	const sidebar = tocHtml == null ? '' : `<aside class="toc-pane">
+<div class="sidebar-header"><a class="link-alt" href="index.html">${escapeHtml(homeLabel || title)}</a></div>
 <nav class="toc" aria-label="Table des matières">
 ${tocHtml}
 </nav>
-</details>
 </aside>`;
+	const group = sidebar
+		? `<div class="post-group">\n${sidebar}\n<article class="post">\n${body}\n</article>\n</div>`
+		: `<main class="container">\n${body}\n</main>`;
 	return `<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="${PICO_CSS}">
+<link rel="stylesheet" href="${PICO_MAIN}">
+<link rel="stylesheet" href="site.css">
 </head>
-<body class="${sidebar ? 'with-toc' : ''}">
-${sidebar}
-<div class="reading">
-${body}
-</div>
+<body>
+${headNav(codes, currentSlug)}
+${group}
 </body>
 </html>
 `;
 }
 
-function tocPage(title, items) {
-	return `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Table des matières — ${escapeHtml(title)}</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body class="toc-page">
-<header>
-<a class="brand" href="index.html">${escapeHtml(title)}</a>
-</header>
-<main class="wrap">
-<h1>Table des matières</h1>
-<nav class="toc" aria-label="Table des matières">
-${renderToc(items, null, true)}
-</nav>
-</main>
-</body>
-</html>
-`;
+function welcomePage(codes) {
+	const cards = codes.map((code) => `<a class="sitemap-card link-alt" href="/${escapeHtml(code.slug)}/">
+<div class="sidebar-header">${escapeHtml(code.slug)}</div>
+<div>${escapeHtml(code.title)}</div>
+</a>`).join('\n');
+	const body = `<h1>Codes</h1>
+<p>Textes en vigueur, repris de <a href="https://www.minfin.fgov.be/myminfin-web/pages/public/fisconet">FisconetPlus</a> (SPF Finances). Ce n'est pas une publication officielle.</p>
+<div class="sitemap-grid">
+${cards || '<p>Aucun code publié.</p>'}
+</div>`;
+	return pageShell({ title: 'Codes', body, codes });
 }
 
 function footer(sourceUrl, retrieved) {
@@ -301,122 +316,35 @@ function footer(sourceUrl, retrieved) {
 	return `<footer><p>Texte en vigueur, sans l'historique des modifications. Repris de <a href="${escapeHtml(sourceUrl)}">FisconetPlus</a> (SPF Finances).${when} Ce n'est pas une publication officielle.</p></footer>`;
 }
 
-const CSS = `/* Minimalist reading layout for a Fisconet code. */
-:root {
-	color-scheme: light;
-	--bg: #f7f5f2;
-	--ink: #1c1917;
-	--muted: #57534e;
-	--line: #e7e5e4;
-	--link: #1d4e89;
-	--measure: 42rem;
+const SITE_CSS = `/* Small overrides on top of https://pico.sh/styles. pico hides .toc-pane below 800px. */
+.mk-nav a[aria-current="page"] { color: var(--green); }
+.toc li::before { content: none; }
+.toc details { border: 0; padding: 0; margin: 0; }
+.toc summary { font-weight: bold; }
+.toc a[aria-current="page"] { color: var(--green); font-weight: bold; }
+nav.pager { display: flex; justify-content: space-between; gap: 1rem; width: 100%; min-width: 0; }
+.post-group { align-items: flex-start; }
+.toc-pane { position: sticky; top: 0; max-height: 100vh; overflow: auto; }
+@media (max-width: 800px) {
+  .toc-pane { display: block; width: 100%; }
+  .toc { height: auto; max-height: 16rem; }
+  .post { height: auto; overflow: visible; border: 0; padding: 0; }
 }
-* { box-sizing: border-box; }
-html { hyphens: auto; }
-body {
-	margin: 0;
-	background: var(--bg);
-	color: var(--ink);
-	font: 1.05rem/1.6 "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
-}
-a { color: var(--link); }
-header, footer, .pager, .meta, .toc, .brand {
-	font-family: system-ui, sans-serif;
-}
-header {
-	position: sticky;
-	top: 0;
-	z-index: 2;
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	justify-content: space-between;
-	gap: 0.6rem 1.2rem;
-	padding: 0.8rem 1.2rem;
-	background: rgba(247, 245, 242, 0.94);
-	border-bottom: 1px solid var(--line);
-}
-.brand { font-size: 0.75rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.brand a { color: inherit; text-decoration: none; }
-header h1, .doc-title { font: 600 1rem/1.3 system-ui, sans-serif; margin: 0; }
-.wrap { max-width: var(--measure); margin: 0 auto; padding: 1.6rem 1.2rem 4rem; }
-.index { --measure: 46rem; }
-.meta, .crumbs, footer { color: var(--muted); font-size: 0.85rem; }
-.crumbs { margin: 0 0 0.4rem; }
-.pager { display: flex; justify-content: space-between; gap: 1rem; margin: 0.8rem 0 1.2rem; font-size: 0.85rem; }
-.pager a { text-decoration: none; }
-.pager a:hover { text-decoration: underline; }
-.prose h1 { font-size: 1.7rem; line-height: 1.25; font-weight: 600; margin: 0 0 0.8rem; }
-.prose p { margin: 0.75em 0; }
-.prose ul, .prose ol { padding-left: 1.4em; }
-.prose table { border-collapse: collapse; width: 100%; margin: 1em 0; font: 0.92rem/1.4 system-ui, sans-serif; }
-.prose td, .prose th { border: 1px solid #d6d3d1; padding: 0.35em 0.6em; vertical-align: top; text-align: left; }
-.prose sup, .prose sub { font-size: 0.75em; }
-	.toc ul { list-style: none; margin: 0.15rem 0; padding-left: 0.75rem; }
-	.toc > ul { padding-left: 0; }
-	.toc a { color: var(--ink); text-decoration: none; }
-	.toc summary {
-		cursor: pointer;
-		font-weight: 600;
-		padding: 0.28rem 0.15rem;
-	}
-	.toc li.article a {
-		display: block;
-		padding: 0.12rem 0.35rem;
-		border-radius: 4px;
-	}
-	.toc li.article a:hover, .toc summary:hover { background: #f1efe9; }
-	.toc a[aria-current="page"] { background: #e7e5e4; font-weight: 600; }
-	footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-	body.with-toc { display: grid; grid-template-columns: 18rem minmax(0, 1fr); min-height: 100vh; }
-	.reading { min-width: 0; }
-	.toc-side {
-		position: sticky; top: 0; align-self: start;
-		height: 100vh; overflow: auto;
-		border-right: 1px solid var(--line); background: #fff;
-		font: 13px/1.4 system-ui, sans-serif;
-	}
-	.toc-side > details > summary { display: none; }
-	.toc-home, .toc-current {
-		display: block;
-		padding: 0.7rem 0.8rem 0;
-		font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
-		color: var(--muted); text-decoration: none;
-	}
-	.toc-current {
-		padding-top: 0.35rem; padding-bottom: 0.45rem;
-		border-bottom: 1px solid var(--line);
-		font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none;
-		color: var(--ink);
-	}
-	.toc-side nav.toc { padding: 0.35rem 0.55rem 2rem; }
-	body.toc-page .toc { font: 0.95rem/1.45 system-ui, sans-serif; }
-	@media (max-width: 800px) {
-		body.with-toc { display: block; }
-		body.with-toc .reading header { position: static; }
-		.toc-side {
-			position: sticky; top: 0; z-index: 3;
-			height: auto; max-height: 45vh;
-			border-right: 0; border-bottom: 1px solid var(--line);
-		}
-		.toc-side > details > summary {
-			display: block; position: sticky; top: 0; z-index: 1;
-			padding: 0.7rem 1rem; cursor: pointer;
-			background: #fff; border-bottom: 1px solid var(--line);
-			font: 600 0.85rem/1.3 system-ui, sans-serif;
-		}
-	}
 @media print {
-	header, .pager, footer, .toc-side { display: none; }
-	body, body.with-toc { display: block; background: #fff; }
-	.wrap { max-width: none; }
+  .mk-nav, .toc-pane, .pager, footer { display: none; }
+  .post { height: auto; overflow: visible; border: 0; }
 }
 `;
 
+function slashPath(value) {
+	return path.resolve(value).replace(/\\/g, '/').replace(/\/?$/, '/');
+}
+
 function publishCommands(siteDir, target) {
-	const source = path.resolve(siteDir).replace(/\\/g, '/').replace(/\/?$/, '/');
+	const source = slashPath(siteDir);
 	// pgs.sh:/<project>/<code>/ is the SSH destination. The public host is
-	// https://<user>-<project>.pgs.sh/<code>/ (ljuc-laws.pgs.sh is not an rsync host).
+	// https://<user>-<project>.pgs.sh/<code>/. The home-folder mount of that
+	// project is ~/pgs.sh/<project>/<code>/, not ~/pgs.sh/ljuc-laws.
 	const dest = `pgs.sh:/${target.project}/${target.code}/`;
 	return {
 		source,
@@ -424,7 +352,23 @@ function publishCommands(siteDir, target) {
 		rsync: `rsync -rtv --delete "${source}" ${dest}`,
 		scp: `scp -r "${source}." ${dest}`,
 		url: `https://${target.user}-${target.project}.pgs.sh/${target.code}/`,
+		home: `https://${target.user}-${target.project}.pgs.sh/`,
 	};
+}
+
+function mountRoot(options) {
+	return options.mount ? path.resolve(options.mount) : path.join(os.homedir(), 'pgs.sh');
+}
+
+async function mountProjectDir(options) {
+	const project = options.project || PICO_PROJECT;
+	const dir = path.join(mountRoot(options), project);
+	try {
+		if ((await stat(dir)).isDirectory()) return dir;
+	} catch {
+		// mount absent (typical on Windows); SSH rsync remains the fallback
+	}
+	return null;
 }
 
 function rsyncAvailable() {
@@ -432,20 +376,171 @@ function rsyncAvailable() {
 	return !result.error && result.status === 0;
 }
 
-function publish(siteDir, target) {
-	const commands = publishCommands(siteDir, target);
-	if (!rsyncAvailable()) {
-		console.error('rsync is not installed. Upload with scp (it does not delete files removed from the site):');
-		console.error(`  ${commands.scp}`);
-		return false;
-	}
-	console.error(`Uploading to ${commands.dest} ...`);
-	const result = spawnSync('rsync', ['-rtv', '--delete', commands.source, commands.dest], { stdio: 'inherit' });
+function rsyncDelete(source, dest) {
+	const from = slashPath(source);
+	const to = slashPath(dest);
+	// pico rejects names that start with ".", so rsync must not create a
+	// hidden temp file on the mount. --inplace writes the destination directly.
+	const result = spawnSync('rsync', ['-rt', '--delete', '--inplace', from, to], { stdio: 'inherit' });
 	if (result.error) throw result.error;
 	if (result.status !== 0) {
-		throw new Error('rsync failed. Check that your pico SSH key can log in to pgs.sh.');
+		throw new Error(`rsync failed (${from} -> ${to})`);
 	}
-	return true;
+}
+
+async function syncDirectory(source, dest) {
+	await mkdir(dest, { recursive: true });
+	const sourceNames = new Set(await readdir(source));
+	let destNames = [];
+	try {
+		destNames = await readdir(dest);
+	} catch {
+		destNames = [];
+	}
+	for (const name of destNames) {
+		if (!sourceNames.has(name)) await rm(path.join(dest, name), { recursive: true, force: true });
+	}
+	for (const name of sourceNames) {
+		const from = path.join(source, name);
+		const to = path.join(dest, name);
+		if ((await stat(from)).isDirectory()) await syncDirectory(from, to);
+		else await copyFile(from, to);
+	}
+}
+
+async function publish(siteDir, target, options) {
+	const commands = publishCommands(siteDir, target);
+	const mounted = await mountProjectDir(options);
+	const mountDest = mounted ? path.join(mounted, target.code) : null;
+	// Upload over SSH to pgs.sh:/<project>/<code>/. That is the same folder as
+	// ~/pgs.sh/<project>/<code>/ when pgs.sh:/ is mounted at home. Writing
+	// through the sshfs mount is not used: pico rejects rsync's hidden temp
+	// files, and an in-place copy of a whole code stalls.
+	if (rsyncAvailable()) {
+		console.error(`Uploading to ${commands.dest} ...`);
+		if (mountDest) console.error(`Mounted view of that folder: ${mountDest}`);
+		const result = spawnSync('rsync', ['-rt', '--delete', commands.source, commands.dest], { stdio: 'inherit' });
+		if (result.error) throw result.error;
+		if (result.status !== 0) {
+			throw new Error('rsync failed. Check that your pico SSH key can log in to pgs.sh.');
+		}
+		return true;
+	}
+	if (mountDest) {
+		console.error(`rsync is not installed. Copying in place to ${mountDest} ...`);
+		await syncDirectory(siteDir, mountDest);
+		return true;
+	}
+	console.error('rsync is not installed and the pico mount was not found. Upload with scp (it does not delete removed files):');
+	console.error(`  ${commands.scp}`);
+	return false;
+}
+
+function decodeEntities(text) {
+	return String(text)
+		.replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+		.replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;|&apos;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&amp;/g, '&');
+}
+
+async function titleFromIndex(indexPath) {
+	try {
+		const html = await readFile(indexPath, 'utf8');
+		const match = html.match(/<title>([^<]*)<\/title>/i);
+		if (!match) return null;
+		return displayTitle(decodeEntities(match[1]).replace(/\s*—\s.*$/, '').replace(/\s+-\s+Table des matières\s*$/i, ''));
+	} catch {
+		return null;
+	}
+}
+
+async function scanDownloads(root) {
+	const found = [];
+	let names;
+	try {
+		names = await readdir(root, { withFileTypes: true });
+	} catch {
+		return found;
+	}
+	for (const entry of names) {
+		if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === '_index') continue;
+		const dir = path.join(root, entry.name);
+		try {
+			const info = await findRoot(dir);
+			found.push({
+				slug: picoSlug(core.slugify(entry.name) || 'code', 'code name'),
+				title: displayTitle(info.title || entry.name),
+			});
+		} catch {
+			// not a downloaded code
+		}
+	}
+	return found;
+}
+
+async function scanMountCodes(projectDir) {
+	const found = [];
+	if (!projectDir) return found;
+	let names;
+	try {
+		names = await readdir(projectDir, { withFileTypes: true });
+	} catch {
+		return found;
+	}
+	for (const entry of names) {
+		if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+		const slug = picoSlug(entry.name, 'code name');
+		const title = await titleFromIndex(path.join(projectDir, entry.name, 'index.html'));
+		if (!title) continue;
+		found.push({ slug, title: displayTitle(title) });
+	}
+	return found;
+}
+
+async function collectCodes(options, current) {
+	const bySlug = new Map();
+	const add = (entry) => {
+		if (!entry?.slug) return;
+		const prev = bySlug.get(entry.slug);
+		bySlug.set(entry.slug, {
+			slug: entry.slug,
+			title: prev?.title || entry.title || entry.slug,
+		});
+	};
+	for (const entry of await scanDownloads(path.join(REPO_ROOT, 'fisconet'))) add(entry);
+	for (const entry of await scanMountCodes(await mountProjectDir(options))) add(entry);
+	if (current) add(current);
+	return [...bySlug.values()].sort((a, b) => a.title.localeCompare(b.title, 'fr'));
+}
+
+async function buildWelcome(options) {
+	const codes = await collectCodes(options);
+	const html = welcomePage(codes);
+	const localDir = path.join(REPO_ROOT, 'fisconet', '_index');
+	await mkdir(localDir, { recursive: true });
+	await writeFile(path.join(localDir, 'index.html'), html);
+	await writeFile(path.join(localDir, 'site.css'), SITE_CSS);
+	const mounted = await mountProjectDir(options);
+	const user = picoSlug(options.user || PICO_USER, 'username');
+	const project = picoSlug(options.project || PICO_PROJECT, 'project');
+	const home = `https://${user}-${project}.pgs.sh/`;
+	if (mounted) {
+		await writeFile(path.join(mounted, 'index.html'), html);
+		await writeFile(path.join(mounted, 'site.css'), SITE_CSS);
+		console.error(`Wrote welcome page to ${mounted}/index.html`);
+		console.error(`Open ${home}`);
+		console.error('Only index.html and site.css were written. Code folders were not deleted.');
+		return;
+	}
+	console.error(`Wrote ${localDir}`);
+	console.error('Mount not found. Upload these two files only (do not rsync --delete pgs.sh:/laws/):');
+	console.error(`  scp "${path.join(localDir, 'index.html')}" pgs.sh:/${options.project || PICO_PROJECT}/index.html`);
+	console.error(`  scp "${path.join(localDir, 'site.css')}" pgs.sh:/${options.project || PICO_PROJECT}/site.css`);
+	console.error(`Public URL: ${home}`);
 }
 
 async function mapPool(items, size, worker) {
@@ -464,9 +559,11 @@ async function build(dir, options) {
 	const rawDir = path.join(dir, 'raw');
 	const rootHtml = await readFile(path.join(rawDir, `${rootInfo.guid}.html`), 'utf8');
 	const analysis = core.analyse(rootHtml);
-	const title = rootInfo.title || core.codeTitle(
+	const title = displayTitle(rootInfo.title || core.codeTitle(
 		JSON.parse(await readFile(path.join(rawDir, `${rootInfo.guid}.json`), 'utf8')).title,
-	);
+	));
+	const target = publishTarget(dir, options);
+	const codes = await collectCodes(options, { slug: target.code, title });
 	const sourceUrl = `${core.SITE}${rootInfo.guid}`;
 	const articles = analysis.articles.filter((article) => article.guid);
 	const idSet = articles.map((article) => article.id);
@@ -485,7 +582,7 @@ async function build(dir, options) {
 	const siteDir = path.join(dir, 'site');
 	await rm(siteDir, { recursive: true, force: true });
 	await mkdir(siteDir, { recursive: true });
-	await writeFile(path.join(siteDir, 'style.css'), CSS);
+	await writeFile(path.join(siteDir, 'site.css'), SITE_CSS);
 
 	let markdownName = null;
 	if (rootInfo.markdown) {
@@ -497,20 +594,28 @@ async function build(dir, options) {
 		? retarget(core.sanitizeHtml(core.rewriteLinks(analysis.root.intro, idByGuid)), null, idSet, idByGuid)
 		: '';
 	const download = markdownName
-		? `<p class="meta"><a href="${escapeHtml(markdownName)}">Télécharger le Markdown</a></p>`
+		? `<p><a class="btn-link" href="${escapeHtml(markdownName)}">Télécharger le Markdown</a></p>`
 		: '';
-	const indexBody = `<header><p class="doc-title">${escapeHtml(title)}</p></header>
-<main class="wrap index">
-<h1 class="prose">${escapeHtml(title)}</h1>
-<p class="meta">${articles.length} articles · <a href="${escapeHtml(sourceUrl)}">Source FisconetPlus</a></p>
+	const indexBody = `<h1>${escapeHtml(title)}</h1>
+<p class="text-sm">${articles.length} articles · <a href="${escapeHtml(sourceUrl)}">Source FisconetPlus</a></p>
 ${download}
-${intro ? `<div class="prose intro">${intro}</div>` : ''}
-<p class="meta"><a href="toc.html">Ouvrir la table des matières</a></p>
-${footer(sourceUrl, rootInfo.retrieved)}
-</main>`;
+${intro ? `<div class="md">${intro}</div>` : ''}
+<p class="text-sm"><a href="toc.html">Table des matières complète</a></p>
+${footer(sourceUrl, rootInfo.retrieved)}`;
 	const items = analysis.root.items;
-	await writeFile(path.join(siteDir, 'toc.html'), tocPage(title, items));
-	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody, renderToc(items)));
+	const shell = (pageTitle, body, tocHtml = null) => pageShell({
+		title: pageTitle,
+		body,
+		tocHtml,
+		codes,
+		currentSlug: target.code,
+		homeLabel: title,
+	});
+	await writeFile(path.join(siteDir, 'toc.html'), shell(
+		`Table des matières — ${title}`,
+		`<h1>Table des matières</h1>\n<nav class="toc" aria-label="Table des matières">\n${renderToc(items, null, true)}\n</nav>`,
+	));
+	await writeFile(path.join(siteDir, 'index.html'), shell(title, indexBody, renderToc(items)));
 
 	const followed = new Map();
 	await mapPool(articles, 32, async (article) => {
@@ -572,37 +677,29 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 				? `<a href="${next.id}.html">${escapeHtml(core.articleHeadingText(next.label))} →</a>`
 				: '<span></span>'
 		}</nav>`;
-		const body = `<header>
-<a class="brand" href="index.html">${escapeHtml(title)}</a>
-<a href="toc.html">Table des matières</a>
-</header>
-<main class="wrap">
-${crumbs.length ? `<p class="crumbs">${crumbs.map(escapeHtml).join(' · ')}</p>` : ''}
+		const body = `${crumbs.length ? `<p class="text-sm">${crumbs.map(escapeHtml).join(' · ')}</p>` : ''}
 ${pager}
-<article class="prose">
+<div class="md">
 <h1 id="${article.id}">${escapeHtml(heading)}</h1>
 ${prose}
-</article>
+</div>
 ${pager}
-${footer(sourceUrl, rootInfo.retrieved)}
-</main>`;
+${footer(sourceUrl, rootInfo.retrieved)}`;
 		await writeFile(
 			path.join(siteDir, `${article.id}.html`),
-			pageShell(`${heading} — ${title}`, body, renderToc(items, article.id), heading, title),
+			shell(`${heading} — ${title}`, body, renderToc(items, article.id)),
 		);
 	}
 
-	const notFound = pageShell(
+	const notFound = shell(
 		`Introuvable — ${title}`,
-		`<main class="wrap"><h1>Page introuvable</h1><p><a href="index.html">Retour au code</a> · <a href="toc.html">Table des matières</a></p></main>`,
+		`<h1>Page introuvable</h1><p><a href="index.html">Retour au code</a> · <a href="toc.html">Table des matières</a></p>`,
 		renderToc(items),
-		'',
-		title,
 	);
 	await writeFile(path.join(siteDir, '404.html'), notFound);
 
-	const target = publishTarget(dir, options);
 	const commands = publishCommands(siteDir, target);
+	const mounted = await mountProjectDir(options);
 	console.error(`Wrote ${siteDir}`);
 	console.error(`  ${articles.length} articles, ${analysis.root.mode} layout, ${followedCount} with commentary text${missing.length ? `, ${missing.length} missing` : ''}`);
 	if (historyLeaks) {
@@ -610,14 +707,14 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 	}
 	console.error('');
 	console.error(`pico+ pages: ${commands.url}`);
-	console.error(`SSH destination (project ${target.project}, this code only): ${commands.dest}`);
-	console.error('Upload with your pico SSH key:');
+	console.error(`SSH destination (this code only): ${commands.dest}`);
 	console.error(`  ${commands.rsync}`);
-	console.error('Without rsync (does not delete removed files):');
-	console.error(`  ${commands.scp}`);
+	if (mounted) {
+		console.error(`Same folder on the home mount: ${path.join(mounted, target.code)}`);
+	}
 
 	if (options.publish) {
-		publish(siteDir, target);
+		await publish(siteDir, target, options);
 		console.error(`Uploaded. Open ${commands.url}`);
 	}
 	if (missing.length) process.exitCode = 1;
@@ -625,9 +722,13 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 
 async function main() {
 	const { positional, options } = parseArguments(process.argv.slice(2));
-	if (options.help || positional.length !== 1) {
+	if (options.help || (!options.index && positional.length !== 1)) {
 		console.error(USAGE);
 		process.exit(options.help ? 0 : 1);
+	}
+	if (options.index) {
+		await buildWelcome(options);
+		return;
 	}
 	await build(path.resolve(positional[0]), options);
 }

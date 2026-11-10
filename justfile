@@ -67,10 +67,14 @@ fisconet-pdf file:
     pandoc "{{ file }}" {{ fisconet-pandoc-args }} -o "{{ without_extension(file) }}.pdf"
     @echo Created {{ without_extension(file) }}.pdf
 
-# Build a minimalist HTML site from a downloaded Fisconet code (writes DIR/site/, with a TOC sidebar)
+# Build a minimalist HTML site from a downloaded Fisconet code (writes DIR/site/, pico styles, TOC sidebar, head menu)
 fisconet-site dir *options:
     node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" {{ options }}
 
-# Upload that site to pico+ pages at pgs.sh:/laws/<name>/ (https://ljuc-laws.pgs.sh/<name>/). Prints the command; runs rsync when it is installed
+# Upload that site to pgs.sh:/laws/<name>/ (the folder mounted at ~/pgs.sh/laws/<name>/). --delete stays inside that code
 fisconet-publish dir *options:
     node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" "{{ dir }}" --publish {{ options }}
+
+# Welcome page for https://ljuc-laws.pgs.sh/ (head menu of every code). Writes index.html only; does not delete code folders
+fisconet-index *options:
+    node "{{ justfile_directory() / "tools/fisconet/site.mjs" }}" --index {{ options }}
