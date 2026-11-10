@@ -499,7 +499,7 @@ async function build(dir, options) {
 	const download = markdownName
 		? `<p class="meta"><a href="${escapeHtml(markdownName)}">Télécharger le Markdown</a></p>`
 		: '';
-	const indexBody = `<header><span class="brand">Better Justel</span><p class="doc-title">${escapeHtml(title)}</p></header>
+	const indexBody = `<header><p class="doc-title">${escapeHtml(title)}</p></header>
 <main class="wrap index">
 <h1 class="prose">${escapeHtml(title)}</h1>
 <p class="meta">${articles.length} articles · <a href="${escapeHtml(sourceUrl)}">Source FisconetPlus</a></p>
@@ -512,8 +512,31 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 	await writeFile(path.join(siteDir, 'toc.html'), tocPage(title, items));
 	await writeFile(path.join(siteDir, 'index.html'), pageShell(title, indexBody, renderToc(items)));
 
+	const followed = new Map();
+	await mapPool(articles, 32, async (article) => {
+		const raw = bodies.get(article.guid);
+		if (typeof raw !== 'string') return;
+		const target = core.commentaryTarget(raw);
+		if (!target) return;
+		if (!idByGuid.has(target.guid)) idByGuid.set(target.guid, article.id);
+		const htmlPath = path.join(rawDir, `${target.guid}.html`);
+		try {
+			followed.set(article.guid, await readFile(htmlPath, 'utf8'));
+		} catch (error) {
+			if (error.code !== 'ENOENT') throw error;
+			let meta = null;
+			try {
+				meta = JSON.parse(await readFile(path.join(rawDir, `${target.guid}.json`), 'utf8'));
+			} catch (metaError) {
+				if (metaError.code !== 'ENOENT') throw metaError;
+			}
+			followed.set(article.guid, meta?.type && meta.type !== 'HTML' ? false : null);
+		}
+	});
+
 	const missing = [];
 	let historyLeaks = 0;
+	let followedCount = 0;
 	for (let index = 0; index < articles.length; index++) {
 		const article = articles[index];
 		const heading = core.articleHeadingText(article.label);
@@ -522,8 +545,18 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 		if (!raw) {
 			missing.push(heading);
 			prose = '<p><em>(texte indisponible : fichier brut absent, relancez just fisconet)</em></p>';
+		} else if (followed.get(article.guid) === null) {
+			missing.push(heading);
+			prose = '<p><em>(commentaire absent : relancez just fisconet pour suivre le lien)</em></p>';
 		} else {
-			const prepared = core.rewriteLinks(core.prepareArticle(raw, article.label, article.id), idByGuid);
+			const commentary = followed.get(article.guid);
+			const prepared = core.rewriteLinks(
+				commentary
+					? core.composeArticle(raw, commentary, article.label, article.id)
+					: core.prepareArticle(raw, article.label, article.id),
+				idByGuid,
+			);
+			if (commentary) followedCount++;
 			prose = retarget(prepared, article.id, idSet, idByGuid);
 			if (/Historique des modifications/i.test(prose)) historyLeaks++;
 		}
@@ -571,7 +604,7 @@ ${footer(sourceUrl, rootInfo.retrieved)}
 	const target = publishTarget(dir, options);
 	const commands = publishCommands(siteDir, target);
 	console.error(`Wrote ${siteDir}`);
-	console.error(`  ${articles.length} articles, ${analysis.root.mode} layout${missing.length ? `, ${missing.length} missing` : ''}`);
+	console.error(`  ${articles.length} articles, ${analysis.root.mode} layout, ${followedCount} with commentary text${missing.length ? `, ${missing.length} missing` : ''}`);
 	if (historyLeaks) {
 		console.error(`  warning: ${historyLeaks} page(s) still mention "Historique des modifications"`);
 	}

@@ -213,22 +213,108 @@
 			)
 			.replace(/<\/?(?:div|center|font)\b[^>]*>/gi, "")
 			.replace(/<\/?span\b[^>]*>/gi, "")
-			.replace(/<a\s+(?:name|id)="[^"]*"\s*><\/a>/gi, "")
-			.replace(/<p>(?:\s|&nbsp;|&#160;|<br\s*\/?>)*<\/p>/gi, "")
+			.replace(/<a\s+(?:name|id)="([^"]*)"\s*><\/a>/gi, '<span id="$1"></span>')
+			.replace(/<p\b[^>]*>([\s\S]*?)<\/p>/gi, (match, inner) =>
+				plainText(inner).replace(/\u00a0/g, "").trim() ? match : "",
+			)
 			.replace(/(<\/(?:p|div|table|ul|ol)>)\s*<br\s*\/?>/gi, "$1");
 	}
 
+	function linkRecords(html) {
+		const records = [];
+		const re = /<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+		let match;
+		while ((match = re.exec(html))) {
+			const href = decodeEntities(match[1]);
+			const guid = href.match(GUID_RE)?.[0].toLowerCase() ?? null;
+			records.push({ href, guid, label: plainText(match[2]) });
+		}
+		return records;
+	}
+
+	function escapeText(text) {
+		return String(text).replace(/[&<>"']/g, (char) => ({
+			"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+		}[char]));
+	}
+
+	function isUpdateLabel(label) {
+		return /mise\s+[àa]\s+jour/i.test(label);
+	}
+
+	function isRangeCommentary(label) {
+		return /\d+\s*[-\u2013\u2014]\s*\d+/.test(label);
+	}
+
+	// Fisconet commentary codes (ComIR, and the same hub layout in other codes)
+	// store a table-of-contents leaf that only points at the real text. The
+	// leaf is not the commentary: "Commentaire" is a link, and "(historique)"
+	// is the legislation, which must stay a link. A law article that merely
+	// links to abrogated articles is not this pattern.
+	function commentaryTarget(html) {
+		if (!html) return null;
+		const links = linkRecords(html).filter((link) =>
+			link.guid && /^(?:commentaire|commentaar)\b/i.test(link.label),
+		);
+		if (links.length === 0) return null;
+		return links.find((link) => !isUpdateLabel(link.label) && !isRangeCommentary(link.label))
+			|| links.find((link) => !isRangeCommentary(link.label))
+			|| null;
+	}
+
+	function legislationLink(html) {
+		return linkRecords(html).find((link) => link.guid && /historique|historiek/i.test(link.label)) || null;
+	}
+
+	function publicHref(link) {
+		if (link.guid && /fisconet\.(?:compare|direct|range)\//i.test(link.href)) return `${SITE}${link.guid}`;
+		if (/^https?:\/\//i.test(link.href)) return link.href;
+		return null;
+	}
+
+	function relatedLinksHtml(html, skipGuids) {
+		const seen = new Set();
+		const items = [];
+		for (const link of linkRecords(html)) {
+			if (link.guid && (skipGuids.has(link.guid) || /historique|historiek/i.test(link.label))) continue;
+			const href = publicHref(link);
+			if (!href || seen.has(href)) continue;
+			seen.add(href);
+			items.push(`<li><a href="${escapeText(href)}">${escapeText(link.label || href)}</a></li>`);
+		}
+		if (items.length === 0) return "";
+		return `<h2>Documents liés</h2><ul>${items.join("")}</ul>`;
+	}
+
+	// Legislation stays a link. The commentary document, when we have it, is
+	// the article body. History inside that document is still removed.
+	function composeArticle(rawHtml, followedHtml, label, id) {
+		const target = commentaryTarget(rawHtml);
+		if (!target || !followedHtml) return prepareArticle(rawHtml, label, id);
+		const legislation = legislationLink(rawHtml);
+		const skip = new Set([target.guid]);
+		if (legislation?.guid) skip.add(legislation.guid);
+		const preface = legislation
+			? `<p><a href="${SITE}${legislation.guid}">${escapeText(legislation.label)}</a></p>`
+			: "";
+		return preface
+			+ prepareArticle(followedHtml, label, id)
+			+ relatedLinksHtml(rawHtml, skip);
+	}
+
 	function rewriteLinks(html, ids) {
+		const mapGuid = (match, rest) => {
+			const guid = String(rest).match(GUID_RE)?.[0].toLowerCase();
+			if (!guid) return match;
+			return ids.has(guid) ? `href="#${ids.get(guid)}"` : `href="${SITE}${guid}"`;
+		};
 		return html
 			.replace(
-				/<a\b[^>]*href="https?:\/\/fisconet\.addenda\/[^"]*"[^>]*>([\s\S]*?)<\/a>/gi,
+				/<a\b[^>]*href="https?:\/\/fisconet\.addenda\/[^\"]*"[^>]*>([\s\S]*?)<\/a>/gi,
 				"$1",
 			)
-			.replace(/href="https?:\/\/fisconet\.(?:compare|direct|range)\/([^"]*)"/gi, (match, rest) => {
-				const guid = rest.match(GUID_RE)?.[0].toLowerCase();
-				if (!guid) return match;
-				return ids.has(guid) ? `href="#${ids.get(guid)}"` : `href="${SITE}${guid}"`;
-			});
+			.replace(/href="https?:\/\/fisconet\.(?:compare|direct|range)\/([^"]*)"/gi, mapGuid)
+			.replace(/href="https?:\/\/www\.minfin\.fgov\.be\/myminfin-web\/pages\/public\/fisconet\/document\/([^"]*)"/gi, mapGuid);
 	}
 
 	function articleSlug(label) {
@@ -305,28 +391,44 @@
 		return sanitizeHtml(body);
 	}
 
-	// `bodies` maps an article GUID to its raw HTML, or to {error: "..."}.
+	function htmlOf(entry) {
+		return typeof entry === "string" ? entry : entry?.html;
+	}
+
+	// `bodies` maps an article GUID (and any followed commentary GUID) to its
+	// raw HTML, or to {error: "..."}.
 	function buildHtml(rootHtml, bodies) {
 		const analysis = analyse(rootHtml);
 		const { root, ids } = analysis;
 		const lookup = (guid) => (bodies && typeof bodies.get === "function" ? bodies.get(guid) : undefined);
+		for (const item of root.items) {
+			if (item.kind !== "article" || !item.guid) continue;
+			const raw = htmlOf(lookup(item.guid));
+			const target = raw ? commentaryTarget(raw) : null;
+			if (target && !ids.has(target.guid)) ids.set(target.guid, item.id);
+		}
 		const parts = [];
 		const missing = [];
 		if (root.intro) parts.push(sanitizeHtml(rewriteLinks(root.intro, ids)));
 		for (const item of root.items) {
 			if (item.kind === "section") {
 				const level = analysis.sectionLevel(item.depth);
-				parts.push(`<h${level}>${item.label}</h${level}>`);
+				parts.push(`<h${level}>${escapeText(item.label)}</h${level}>`);
 				continue;
 			}
-			parts.push(`<h${analysis.articleLevel} id="${item.id}">${articleHeadingText(item.label)}</h${analysis.articleLevel}>`);
+			parts.push(`<h${analysis.articleLevel} id="${item.id}">${escapeText(articleHeadingText(item.label))}</h${analysis.articleLevel}>`);
 			const entry = item.guid ? lookup(item.guid) : undefined;
-			const html = typeof entry === "string" ? entry : entry?.html;
+			const html = htmlOf(entry);
 			if (html) {
-				parts.push(rewriteLinks(prepareArticle(html, item.label, item.id), ids));
+				const target = commentaryTarget(html);
+				const followed = target ? htmlOf(lookup(target.guid)) : null;
+				const body = followed
+					? composeArticle(html, followed, item.label, item.id)
+					: prepareArticle(html, item.label, item.id);
+				parts.push(rewriteLinks(body, ids));
 			} else if (entry?.error) {
 				missing.push(item.label);
-				parts.push(`<p><em>(texte indisponible : ${entry.error})</em></p>`);
+				parts.push(`<p><em>(texte indisponible : ${escapeText(entry.error)})</em></p>`);
 			}
 		}
 		return { ...analysis, html: parts.join("\n"), missing };
@@ -341,6 +443,8 @@
 		decodeBase64,
 		analyse,
 		prepareArticle,
+		commentaryTarget,
+		composeArticle,
 		rewriteLinks,
 		articleHeadingText,
 		articleIdFromFragment,

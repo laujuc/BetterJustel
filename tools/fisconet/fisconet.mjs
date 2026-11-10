@@ -87,15 +87,16 @@ async function fetchDocument(guid) {
 async function fetchCached(guid, rawDir, refresh) {
 	const htmlFile = path.join(rawDir, `${guid}.html`);
 	const metaFile = path.join(rawDir, `${guid}.json`);
-	if (!refresh && (await exists(htmlFile)) && (await exists(metaFile))) {
+	if (!refresh && (await exists(metaFile))) {
 		const meta = JSON.parse(await readFile(metaFile, 'utf8'));
-		return { ...meta, html: await readFile(htmlFile, 'utf8') };
+		if (meta.type && meta.type !== 'HTML') return meta;
+		if (await exists(htmlFile)) return { ...meta, html: await readFile(htmlFile, 'utf8') };
 	}
 	const document = await fetchDocument(guid);
-	if (document.type !== 'HTML') return document;
-	const { html, ...meta } = document;
-	await writeFile(htmlFile, html);
+	const { html, data, ...meta } = document;
 	await writeFile(metaFile, JSON.stringify(meta, null, 2));
+	if (document.type !== 'HTML') return document;
+	await writeFile(htmlFile, html);
 	return document;
 }
 
@@ -237,6 +238,42 @@ async function getCommand(target, options) {
 		}
 	});
 	if (process.stderr.isTTY) process.stderr.write('\n');
+
+	// A commentary code's table of contents stops at a hub page. The text is
+	// the document linked under "Commentaire", one hop further. Stay at the
+	// same concurrency; do not inline the legislation "(historique)" document.
+	const commentaryGuids = new Set();
+	for (const article of downloadable) {
+		const html = bodies.get(article.guid);
+		if (typeof html !== 'string') continue;
+		const target = core.commentaryTarget(html);
+		if (target && !bodies.has(target.guid)) commentaryGuids.add(target.guid);
+	}
+	if (commentaryGuids.size > 0) {
+		console.error(`Following ${commentaryGuids.size} commentary document(s)...`);
+		let followed = 0;
+		await pool([...commentaryGuids], concurrency, async (guid) => {
+			try {
+				const document = await fetchCached(guid, rawDir, refresh);
+				if (document.type === 'HTML') {
+					bodies.set(guid, document.html);
+				} else {
+					bodies.set(guid, { type: document.type });
+					console.error(`  ${guid} is ${document.type}; left as a link`);
+				}
+			} catch (error) {
+				bodies.set(guid, { error: error.message });
+				failures.push(`commentary ${guid}: ${error.message}`);
+			}
+			followed++;
+			if (process.stderr.isTTY) {
+				process.stderr.write(`\r  commentary ${followed}/${commentaryGuids.size}`);
+			} else if (followed % 50 === 0 || followed === commentaryGuids.size) {
+				console.error(`  commentary ${followed}/${commentaryGuids.size}`);
+			}
+		});
+		if (process.stderr.isTTY) process.stderr.write('\n');
+	}
 
 	const built = core.buildHtml(rootDocument.html, bodies);
 	const htmlFile = path.join(outDir, `${name}.html`);

@@ -169,7 +169,7 @@
 		};
 	}
 
-	async function pool(items, worker, signal) {
+	async function pool(items, worker, signal, label = "Article") {
 		let next = 0;
 		let done = 0;
 		const runners = Array.from({length: Math.min(CONCURRENCY, items.length)}, async () => {
@@ -178,7 +178,7 @@
 				const item = items[next++];
 				await worker(item);
 				done++;
-				setStatus(`Article ${done} / ${items.length}`);
+				setStatus(`${label} ${done} / ${items.length}`);
 			}
 		});
 		await Promise.all(runners);
@@ -258,6 +258,29 @@
 						bodies.set(article.guid, {error: error.message});
 					}
 				}, abort.signal);
+			}
+			const commentaryGuids = [];
+			const seenCommentary = new Set();
+			for (const article of articles) {
+				const html = bodies.get(article.guid);
+				if (typeof html !== "string") continue;
+				const target = core.commentaryTarget(html);
+				if (!target || bodies.has(target.guid) || seenCommentary.has(target.guid)) continue;
+				seenCommentary.add(target.guid);
+				commentaryGuids.push(target.guid);
+			}
+			if (commentaryGuids.length > 0) {
+				setStatus(`Commentaire 0 / ${commentaryGuids.length}`);
+				await pool(commentaryGuids, async (guid) => {
+					try {
+						const document = await loadDocument(guid, abort.signal);
+						if (document.type === "HTML") bodies.set(guid, document.html);
+						else bodies.set(guid, {type: document.type});
+					} catch (error) {
+						if (error.name === "AbortError") throw error;
+						bodies.set(guid, {error: error.message});
+					}
+				}, abort.signal, "Commentaire");
 			}
 			if (abort.signal.aborted) {
 				setStatus("Téléchargement annulé.");
@@ -357,8 +380,11 @@
 		reader = null;
 	}
 
-	function articleHtml(raw, article, ids) {
-		return core.sanitizeHtml(core.rewriteLinks(core.prepareArticle(raw, article.label, article.id), ids));
+	function articleHtml(raw, article, ids, followed) {
+		const body = followed
+			? core.composeArticle(raw, followed, article.label, article.id)
+			: core.prepareArticle(raw, article.label, article.id);
+		return core.sanitizeHtml(core.rewriteLinks(body, ids));
 	}
 
 	async function openReader() {
@@ -476,9 +502,16 @@
 		function loadArticle(article) {
 			if (cache.has(article.guid)) return Promise.resolve(cache.get(article.guid));
 			if (inflight.has(article.guid)) return inflight.get(article.guid);
-			const promise = loadDocument(article.guid, controller.signal).then((document) => {
+			const promise = loadDocument(article.guid, controller.signal).then(async (document) => {
 				if (document.type !== "HTML") throw new Error(`pas un document HTML (${document.type})`);
-				const html = articleHtml(document.html, article, analysis.ids);
+				let followed = null;
+				const target = core.commentaryTarget(document.html);
+				if (target) {
+					const commentary = await loadDocument(target.guid, controller.signal);
+					if (commentary.type === "HTML") followed = commentary.html;
+					if (followed && !analysis.ids.has(target.guid)) analysis.ids.set(target.guid, article.id);
+				}
+				const html = articleHtml(document.html, article, analysis.ids, followed);
 				cache.set(article.guid, html);
 				return html;
 			}).finally(() => inflight.delete(article.guid));
