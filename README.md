@@ -2,7 +2,7 @@
 
 ## Concept
 
-betterlaws is a browser extension (available for [Chrome](https://chrome.google.com/webstore/detail/better-justel/jjknlnihcjeefjgdacaanbiedamibimp) and [Firefox](https://addons.mozilla.org/fr/firefox/addon/better-justel/)) for a clearer layout of Belgian legislation. On [Justel](https://www.ejustice.just.fgov.be/cgi_loi/rech.pl?language=fr), the Belgian database of consolidated legislation, it rebuilds each act into a more usable page. On FisconetPlus it adds a reader and a Markdown download for tax codes. Source code: [laujuc/betterlaws](https://github.com/laujuc/betterlaws).
+betterlaws is a fork of [Better Justel](https://github.com/rafjaf/BetterJustel) by Rafaël Jafferali. The original extension, published for [Chrome](https://chrome.google.com/webstore/detail/better-justel/jjknlnihcjeefjgdacaanbiedamibimp) and [Firefox](https://addons.mozilla.org/fr/firefox/addon/better-justel/), rebuilds acts from [Justel](https://www.ejustice.just.fgov.be/cgi_loi/rech.pl?language=fr) into a clearer page. This fork keeps that work. It is renamed because the later changes are no longer Justel-only: FisconetPlus reading and download, consolidated Markdown, Typst PDFs, and static law pages. Source: [laujuc/betterlaws](https://github.com/laujuc/betterlaws).
 
 IMPORTANCE NOTICE: If you are using the Firefox extension, the first time you will surf to Justel website, a blue dot will appear on the icon of the extension. You must right-click on the extension icon and grant it permission to always run on www.ejustice.fgov.be. Otherwise, the extension will not work.
 
@@ -41,9 +41,11 @@ Additionnally, the use of this browser extension is governed by Belgian law and 
 
 ## Credits
 
-This extension was written by Rafaël Jafferali. 
+betterlaws is a fork of [Better Justel](https://github.com/rafjaf/BetterJustel), written by Rafaël Jafferali. The Justel reader — search, table of contents, highlights, offline acts, and case-law abstracts — is his work, and this repository keeps that credit.
 
-This extension was inspired by the very thorough userscript written by Naja Melan <https://userscripts-mirror.org/scripts/show/11725>.
+The rename is justified by changes that go beyond that reader: FisconetPlus, consolidated Markdown export, Pandoc/Typst PDFs, and publishing codes as static pages. Those additions live in [laujuc/betterlaws](https://github.com/laujuc/betterlaws).
+
+The original extension was inspired by the userscript written by Naja Melan <https://userscripts-mirror.org/scripts/show/11725>.
 
 It makes use of the following open source libraries :
 
@@ -125,6 +127,8 @@ It makes use of the following open source libraries :
 - Version 0.8.0 :
 	- offline tooling (justfile) to convert the exported Markdown timelines into clean typeset PDFs with Pandoc and Typst (`just pdf law.md`, or `just pdfs directory/` for a batch): real footnotes at the bottom of each page, one archived version per page, running header with the title of the act, justified French text in Libertinus Serif; a Pandoc template and a Lua filter are provided in tools/pdf
 	- the PDF recipes are OS-agnostic (sh on Linux/macOS, PowerShell on Windows; no bash needed on Windows) and use absolute paths resolved from the justfile, so they also work for law texts stored outside the repository
+- Version 0.13.2 :
+	- credits the original Better Justel by Rafaël Jafferali; the rename stands because the fork now covers more than Justel
 - Version 0.13.1 :
 	- an existing pCloud `/BetterJustel` folder is renamed to `/betterlaws` on the next backup
 - Version 0.13.0 :
