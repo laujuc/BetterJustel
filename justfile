@@ -1,4 +1,4 @@
-# Better Justel — offline tooling
+# betterlaws — offline tooling
 #
 # The extension exports law timelines as Markdown ("Timeline (MD/PDF)" >
 # Download Markdown). These recipes turn the exported Markdown into clean

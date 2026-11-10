@@ -22,7 +22,7 @@ function cacheKeyForUrl(rawUrl) {
 		}
 	}
 	catch (e) {
-		console.warn("[Better Justel] Invalid navigation URL:", rawUrl, e.message);
+		console.warn("[betterlaws] Invalid navigation URL:", rawUrl, e.message);
 	}
 	return null;
 }
@@ -53,7 +53,7 @@ async function redirectCachedNavigation(details) {
 		await chrome.tabs.update(details.tabId, {url: offlineUrl});
 	}
 	catch (e) {
-		console.warn("[Better Justel] Could not redirect cached navigation:", e.message);
+		console.warn("[betterlaws] Could not redirect cached navigation:", e.message);
 	}
 	finally {
 		redirectingTabs.delete(details.tabId);

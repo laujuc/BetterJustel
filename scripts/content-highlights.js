@@ -240,7 +240,7 @@ window.BJ.highlightsModule = function(ctx) {
 							await ctx.setStorage("highlights-" + ctx.act.eli, ctx.highlights.quotes);
 						}
 					  } catch (e) {
-						console.warn("[Better Justel] Error creating highlight (anchoring failed):", e.message);
+						console.warn("[betterlaws] Error creating highlight (anchoring failed):", e.message);
 					  }
 					}
 				}

@@ -1,8 +1,8 @@
 // Pandoc/Typst template producing a clean PDF of a Justel law timeline
-// exported by Better Justel. See the "pdf" recipe of the justfile.
+// exported by betterlaws. See the "pdf" recipe of the justfile.
 
 $if(title)$
-#set document(title: [$title$], author: ("Better Justel",))
+#set document(title: [$title$], author: ("betterlaws",))
 $endif$
 
 // Pandoc emits different Typst for Markdown horizontal rules depending on

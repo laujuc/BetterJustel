@@ -138,7 +138,7 @@ window.BJ.caselawModule = function(ctx) {
 				const sanitized = dossier.replace(/[-\/]/g, ""); // e.g. "1984112233"
 				return "cgi_loi_loi_" + sanitized + ".json";
 			}
-			console.log("[Better Justel - Case Law] No Dossier numéro found for non-ELI text");
+			console.log("[betterlaws - Case Law] No Dossier numéro found for non-ELI text");
 			return null;
 		}
 		return null;
@@ -246,13 +246,13 @@ window.BJ.caselawModule = function(ctx) {
 			if (!forceFetch && fetchInfo?.lastFetch && (Date.now() - fetchInfo.lastFetch) < FETCH_INTERVAL_MS) {
 				relData = await ctx.getStorage(relCaselawKey);
 				if (relData) {
-					console.log(`[Better Justel - Case Law] Using cached case-law for related text: ${rel.fromELI}`);
+					console.log(`[betterlaws - Case Law] Using cached case-law for related text: ${rel.fromELI}`);
 				}
 			}
 
 			if (!relData) {
 				const url = GITHUB_RAW_BASE + filename;
-				console.log(`[Better Justel - Case Law] Fetching related case law for ${rel.fromELI}: ${url}`);
+				console.log(`[betterlaws - Case Law] Fetching related case law for ${rel.fromELI}: ${url}`);
 				try {
 					const resp = await fetch(url);
 					if (resp.ok) {
@@ -265,13 +265,13 @@ window.BJ.caselawModule = function(ctx) {
 						}
 						await ctx.setStorage(relFetchInfoKey, { lastFetch: Date.now() });
 					} else {
-						console.warn(`[Better Justel - Case Law] HTTP ${resp.status} fetching related case law from ${url}`);
+						console.warn(`[betterlaws - Case Law] HTTP ${resp.status} fetching related case law from ${url}`);
 						if (resp.status === 404) {
 							await ctx.setStorage(relFetchInfoKey, { lastFetch: Date.now() });
 						}
 					}
 				} catch (e) {
-					console.warn(`[Better Justel - Case Law] Network error fetching related case law:`, e.message);
+					console.warn(`[betterlaws - Case Law] Network error fetching related case law:`, e.message);
 				}
 			}
 
@@ -358,10 +358,10 @@ window.BJ.caselawModule = function(ctx) {
 		if (fetchInfo && fetchInfo.lastFetch) {
 			const elapsed = Date.now() - fetchInfo.lastFetch;
 			if (elapsed < FETCH_INTERVAL_MS) {
-				console.log(`[Better Justel - Case Law] Skipping fetch for ${eli} — last fetched ${Math.round(elapsed / 60000)} minutes ago`);
+				console.log(`[betterlaws - Case Law] Skipping fetch for ${eli} — last fetched ${Math.round(elapsed / 60000)} minutes ago`);
 				const cached = await ctx.getStorage(caselawKey);
 				if (cached) {
-					console.log(`[Better Justel - Case Law] Using cached case-law data (${countAbstracts(cached)} abstracts)`);
+					console.log(`[betterlaws - Case Law] Using cached case-law data (${countAbstracts(cached)} abstracts)`);
 				}
 				const relatedInfo = await ctx.getStorage(relatedInfoKey) || [];
 				return { data: cached || null, relatedInfo, newAbstracts: 0, newArticles: 0, wasCached: true };
@@ -371,22 +371,22 @@ window.BJ.caselawModule = function(ctx) {
 		// Determine filename
 		const filename = getCaselawFilename();
 		if (!filename) {
-			console.log("[Better Justel - Case Law] Cannot determine Juportal Crawler filename for this act");
+			console.log("[betterlaws - Case Law] Cannot determine Juportal Crawler filename for this act");
 			return { data: await ctx.getStorage(caselawKey) || null, relatedInfo: [], newAbstracts: 0, newArticles: 0, wasCached: false };
 		}
 
 		const url = GITHUB_RAW_BASE + filename;
-		console.log(`[Better Justel - Case Law] Accessing Juportal Crawler database: ${url}`);
+		console.log(`[betterlaws - Case Law] Accessing Juportal Crawler database: ${url}`);
 
 		try {
 			const response = await fetch(url);
 			if (!response.ok) {
 				if (response.status === 404) {
-					console.log(`[Better Justel - Case Law] No case-law data found on Juportal Crawler for ${eli}`);
+					console.log(`[betterlaws - Case Law] No case-law data found on Juportal Crawler for ${eli}`);
 					// 404 means genuinely no data — record fetch to avoid re-fetching too soon
 					await ctx.setStorage(fetchInfoKey, { lastFetch: Date.now() });
 				} else {
-					console.warn(`[Better Justel - Case Law] HTTP error ${response.status} fetching case-law for ${eli} — will retry on next load`);
+					console.warn(`[betterlaws - Case Law] HTTP error ${response.status} fetching case-law for ${eli} — will retry on next load`);
 					// Do not update fetch timestamp for server errors — allow retry on next load
 				}
 				// Keep existing cached data, if any
@@ -398,7 +398,7 @@ window.BJ.caselawModule = function(ctx) {
 			try {
 				rawData = JSON.parse(rawText);
 			} catch (e) {
-				console.error("[Better Justel - Case Law] Invalid JSON received from Juportal Crawler:", e.message);
+				console.error("[betterlaws - Case Law] Invalid JSON received from Juportal Crawler:", e.message);
 				await ctx.setStorage(fetchInfoKey, { lastFetch: Date.now() });
 				return { data: await ctx.getStorage(caselawKey) || null, relatedInfo: [], newAbstracts: 0, newArticles: 0, wasCached: false };
 			}
@@ -410,7 +410,7 @@ window.BJ.caselawModule = function(ctx) {
 			// Sanitize
 			const cleanData = sanitizeCaselawData(rawData);
 			if (!cleanData) {
-				console.error("[Better Justel - Case Law] Sanitization failed — data discarded");
+				console.error("[betterlaws - Case Law] Sanitization failed — data discarded");
 				await ctx.setStorage(fetchInfoKey, { lastFetch: Date.now() });
 				return { data: await ctx.getStorage(caselawKey) || null, relatedInfo: [], newAbstracts: 0, newArticles: 0, wasCached: false };
 			}
@@ -421,7 +421,7 @@ window.BJ.caselawModule = function(ctx) {
 			const cleanJSON = JSON.stringify(cleanData);
 
 			if (cachedJSON === cleanJSON) {
-				console.log("[Better Justel - Case Law] No updates detected — data unchanged (deep comparison)");
+				console.log("[betterlaws - Case Law] No updates detected — data unchanged (deep comparison)");
 				await ctx.setStorage(fetchInfoKey, { lastFetch: Date.now() });
 				await ctx.setStorage(relatedInfoKey, relatedInfo);
 				return { data: cleanData, relatedInfo, newAbstracts: 0, newArticles: 0, wasCached: false };
@@ -432,10 +432,10 @@ window.BJ.caselawModule = function(ctx) {
 			let newAbstracts = totalAbstracts;
 			if (cachedData) {
 				const oldCount = countAbstracts(cachedData);
-				console.log(`[Better Justel - Case Law] Data changed: ${oldCount} → ${totalAbstracts} abstracts — replacing cache entirely`);
+				console.log(`[betterlaws - Case Law] Data changed: ${oldCount} → ${totalAbstracts} abstracts — replacing cache entirely`);
 				newAbstracts = Math.max(0, totalAbstracts - oldCount);
 			} else {
-				console.log(`[Better Justel - Case Law] First fetch: ${totalAbstracts} abstracts for ${eli}`);
+				console.log(`[betterlaws - Case Law] First fetch: ${totalAbstracts} abstracts for ${eli}`);
 			}
 			const newArticles = Object.keys(cleanData).length;
 
@@ -447,7 +447,7 @@ window.BJ.caselawModule = function(ctx) {
 			return { data: cleanData, relatedInfo, newAbstracts, newArticles, wasCached: false };
 		}
 		catch (e) {
-			console.error("[Better Justel - Case Law] Network error fetching case-law:", e.message);
+			console.error("[betterlaws - Case Law] Network error fetching case-law:", e.message);
 			// Do not update fetch timestamp on network error — allow retry on next load
 			// Keep existing cached data, if any
 			return { data: await ctx.getStorage(caselawKey) || null, relatedInfo: [], newAbstracts: 0, newArticles: 0, wasCached: false };
@@ -836,7 +836,7 @@ window.BJ.caselawModule = function(ctx) {
 			}
 		});
 
-		console.log(`[Better Justel - Case Law] Displayed case-law for ${articlesWithCaselaw} articles`);
+		console.log(`[betterlaws - Case Law] Displayed case-law for ${articlesWithCaselaw} articles`);
 	}
 
 	/**
@@ -854,7 +854,7 @@ window.BJ.caselawModule = function(ctx) {
 			const articleDiv = document.querySelector(`div#anchor_${articleId}`);
 			const caselawContent = articleDiv?.querySelector(".caselaw-content");
 			if (!caselawContent) {
-				console.info(`[Better Justel - Case Law] Article ${articleId} no longer has case-law, deleting case-law highlights`);
+				console.info(`[betterlaws - Case Law] Article ${articleId} no longer has case-law, deleting case-law highlights`);
 				delete quotes[articleId];
 				changesMade = true;
 				continue;
@@ -866,7 +866,7 @@ window.BJ.caselawModule = function(ctx) {
 				try {
 					const range = anchoring.TextQuoteAnchor.toRange(caselawContent, q);
 					if (!range) {
-						console.info(`[Better Justel - Case Law] Cannot anchor quote in article ${articleId}, removing`);
+						console.info(`[betterlaws - Case Law] Cannot anchor quote in article ${articleId}, removing`);
 						toRemove.push(i);
 						continue;
 					}
@@ -877,7 +877,7 @@ window.BJ.caselawModule = function(ctx) {
 					const wrapper = anchoring.WrapRangeText(h, range);
 					ctx.highlights.wrappers[h.id] = wrapper;
 				} catch (e) {
-					console.warn(`[Better Justel - Case Law] Error anchoring case-law highlight:`, e.message);
+					console.warn(`[betterlaws - Case Law] Error anchoring case-law highlight:`, e.message);
 					toRemove.push(i);
 				}
 			}
@@ -968,7 +968,7 @@ window.BJ.caselawModule = function(ctx) {
 		await ctx.setStorage("caselaw-fetch-" + eli, null);
 		await ctx.setStorage("caselaw-" + eli, null);
 		await ctx.setStorage("caselaw-related-info-" + eli, null);
-		console.log(`[Better Justel - Case Law] Cleared case-law data and fetch flag for ${eli}`);
+		console.log(`[betterlaws - Case Law] Cleared case-law data and fetch flag for ${eli}`);
 	}
 
 	/**
@@ -979,7 +979,7 @@ window.BJ.caselawModule = function(ctx) {
 			// Check if the user has enabled the experimental case law feature
 			const caselawEnabled = await ctx.getStorage("caselawEnabled");
 			if (!caselawEnabled) {
-				console.log("[Better Justel - Case Law] Case law display is disabled. Enable it in the popup.");
+				console.log("[betterlaws - Case Law] Case law display is disabled. Enable it in the popup.");
 				return;
 			}
 			const { data: caselawData, relatedInfo, newAbstracts, newArticles, wasCached } = await fetchCaseLaw();
@@ -996,10 +996,10 @@ window.BJ.caselawModule = function(ctx) {
 					ctx.showStatusMessage(`Fetched ${newAbstracts} new case law ${aStr} for ${newArticles} ${artStr} from Juportal database`);
 				}
 			} else {
-				console.log("[Better Justel - Case Law] No case-law data to display");
+				console.log("[betterlaws - Case Law] No case-law data to display");
 			}
 		} catch (e) {
-			console.error("[Better Justel - Case Law] Error loading case-law:", e.message);
+			console.error("[betterlaws - Case Law] Error loading case-law:", e.message);
 		}
 	}
 

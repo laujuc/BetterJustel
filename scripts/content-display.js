@@ -42,7 +42,7 @@ window.BJ.displayModule = function(ctx) {
 					: new URL(href, justelBase).href;
 			}
 			catch (e) {
-				console.warn("[Better Justel] Could not resolve stored link:", href);
+				console.warn("[betterlaws] Could not resolve stored link:", href);
 			}
 		}
 	}
@@ -67,7 +67,7 @@ window.BJ.displayModule = function(ctx) {
 				ctx.showStatusMessage("ELI copied to clipboard");
 			}
 			catch (e) {
-				console.error("[Better Justel] Could not copy ELI:", e.message);
+				console.error("[betterlaws] Could not copy ELI:", e.message);
 				ctx.showStatusMessage("Could not copy the ELI to the clipboard");
 			}
 		});
@@ -81,8 +81,8 @@ window.BJ.displayModule = function(ctx) {
 
 		const brand = document.createElement("div");
 		brand.className = "act-header__brand";
-		brand.textContent = "Better Justel";
-		brand.title = "Enhanced by Better Justel";
+		brand.textContent = "betterlaws";
+		brand.title = "Enhanced by betterlaws";
 		info.prepend(brand);
 
 		const heading = info.querySelector("p.list-item--title");
@@ -213,7 +213,7 @@ window.BJ.displayModule = function(ctx) {
 				return;
 			}
 			ctx.exportTimeline(popup).catch(error => {
-				console.error("[Better Justel] Could not export law timeline:", error.message);
+				console.error("[betterlaws] Could not export law timeline:", error.message);
 				ctx.showStatusMessage(`Could not export law timeline: ${error.message}`);
 			});
 		});
@@ -263,7 +263,7 @@ window.BJ.displayModule = function(ctx) {
 									ctx.highlights.wrappers[h.id] = wrapper;
 								}
 							} catch (e) {
-								console.warn(`[Better Justel] Error anchoring highlight in article "${key}":`, e.message);
+								console.warn(`[betterlaws] Error anchoring highlight in article "${key}":`, e.message);
 								let i = ctx.highlights.quotes[key].findIndex(el => el.id == q.id);
 								if (i !== -1) {
 									ctx.highlights.quotes[key].splice(i, 1);
@@ -279,7 +279,7 @@ window.BJ.displayModule = function(ctx) {
 		}
 		// Erase document and start afresh
 		// The online document's styles otherwise keep affecting the rebuilt DOM,
-		// while the standalone offline document has only Better Justel's styles.
+		// while the standalone offline document has only betterlaws styles.
 		// Parsing is complete at this point, so the original Justel CSS is no
 		// longer needed and can safely be detached.
 		document.querySelectorAll('link[rel~="stylesheet"]').forEach(function(link) {
@@ -291,7 +291,7 @@ window.BJ.displayModule = function(ctx) {
 			catch (_) {}
 		});
 		document.body.removeAttribute("style");
-		document.body.className = "better-justel";
+		document.body.className = "betterlaws";
 		$("body").children().remove();
 		$("body").append(`<div id='main'>
 								<div id='info'></div>
@@ -442,7 +442,7 @@ window.BJ.displayModule = function(ctx) {
 		const lastVersion = await ctx.getStorage("extensionVersion");
 		const currentVersion = chrome.runtime.getManifest().version;
 		if (lastVersion != currentVersion) {
-			ctx.showStatusMessage(`Better Justel has been updated to version ${currentVersion}. Click <a href="https://github.com/rafjaf/BetterJustel#release-history" target="_blank">here</a> for more info`);
+			ctx.showStatusMessage(`betterlaws has been updated to version ${currentVersion}. Click <a href="https://github.com/laujuc/betterlaws#release-history" target="_blank">here</a> for more info`);
 			await ctx.setStorage("extensionVersion", currentVersion);
 		}
 	}

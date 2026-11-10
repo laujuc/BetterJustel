@@ -780,7 +780,7 @@ window.BJ.exportModule = function(ctx) {
 			if (!snapshots.length) { throw new Error("Justel did not return any versions for this act"); }
 			const markdown = makeMarkdown(snapshots);
 			presentMarkdown(popup, markdown);
-			console.info(`[Better Justel] Prepared Markdown timeline for ${ctx.act.numac} (${snapshots.length} versions)`);
+			console.info(`[betterlaws] Prepared Markdown timeline for ${ctx.act.numac} (${snapshots.length} versions)`);
 		}
 		catch (error) {
 			if (!popup.closed) {

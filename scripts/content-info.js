@@ -14,7 +14,7 @@ window.BJ.infoModule = function(ctx) {
 	}
 
 	async function analyseFirstInfo() {
-		console.log(`[Better Justel] analyseFirstInfo() started (readyState: "${document.readyState}")`);
+		console.log(`[betterlaws] analyseFirstInfo() started (readyState: "${document.readyState}")`);
 		// Capture numac of the act from the top of the page
 		ctx.act.numac = document.querySelector("div#list-title-1 span.tag")?.textContent;
 		let _numacWaitMs = 0;
@@ -24,15 +24,15 @@ window.BJ.infoModule = function(ctx) {
 			_numacWaitMs += 500;
 			ctx.act.numac = document.querySelector("div#list-title-1 span.tag")?.textContent;
 			if (_numacWaitMs % 5000 === 0) {
-				console.warn(`[Better Justel] Still waiting for numac after ${_numacWaitMs / 1000}s (readyState: "${document.readyState}", ` +
+				console.warn(`[betterlaws] Still waiting for numac after ${_numacWaitMs / 1000}s (readyState: "${document.readyState}", ` +
 					`body children: ${document.body?.children?.length || 0}, title-1 exists: ${!!document.querySelector("div#list-title-1")})`);
 			}
 			if (_numacWaitMs >= 30000) {
-				console.error("[Better Justel] Timeout waiting for numac after 30s — aborting");
+				console.error("[betterlaws] Timeout waiting for numac after 30s — aborting");
 				return { timeout: true };
 			}
 		}
-		console.log(`[Better Justel] Numac found: ${ctx.act.numac} (after ${_numacWaitMs}ms)`);
+		console.log(`[betterlaws] Numac found: ${ctx.act.numac} (after ${_numacWaitMs}ms)`);
 		// Check if ELI can be determined from numac
 		if (ctx.numac2eli[ctx.act.numac]) {
 			ctx.act.eli = ctx.numac2eli[ctx.act.numac];
@@ -53,20 +53,20 @@ window.BJ.infoModule = function(ctx) {
 				// Exit if the page is fully loaded and we have given it a 2-second grace period
 				// (handles non-ELI pages where a#link-text genuinely never appears)
 				if (document.readyState === "complete" && _loadWaitMs >= 2000) {
-					console.log(`[Better Justel] Page fully loaded after ${_loadWaitMs / 1000}s, ELI not found  — treating as non-ELI page.`);
+					console.log(`[betterlaws] Page fully loaded after ${_loadWaitMs / 1000}s, ELI not found  — treating as non-ELI page.`);
 					break;
 				}
 				if (_loadWaitMs % 5000 === 0) {
-					console.warn(`[Better Justel] Still waiting for ELI link after ${_loadWaitMs / 1000}s (readyState: "${document.readyState}")`);
+					console.warn(`[betterlaws] Still waiting for ELI link after ${_loadWaitMs / 1000}s (readyState: "${document.readyState}")`);
 				}
 				if (_loadWaitMs === 20000) {
-					console.error("[Better Justel] Page appears stuck. Offering reload to user.");
+					console.error("[betterlaws] Page appears stuck. Offering reload to user.");
 					ctx.addLoading("Loading page from Justel server"
 						+ " &mdash; the server is taking a long time."
 						+ " <a href='javascript:window.location.reload()'>Reload</a>");
 				}
 				if (_loadWaitMs >= 60000) {
-					console.error(`[Better Justel] Timeout after ${_loadWaitMs / 1000}s waiting for ELI — giving up.`);
+					console.error(`[betterlaws] Timeout after ${_loadWaitMs / 1000}s waiting for ELI — giving up.`);
 					break;
 				}
 			}
@@ -102,7 +102,7 @@ window.BJ.infoModule = function(ctx) {
 					ctx.act.date = digits.slice(0,4) + "-" + digits.slice(4,6) + "-" + digits.slice(6,8);
 				}
 			}
-			console.log(`[Better Justel] Treaty date resolved: ${ctx.act.date} (numac: ${ctx.act.numac})`);
+			console.log(`[betterlaws] Treaty date resolved: ${ctx.act.date} (numac: ${ctx.act.numac})`);
 		}
 		else {
 			ctx.act.type = ctx.act.eli.split("/")[4];

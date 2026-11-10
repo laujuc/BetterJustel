@@ -147,7 +147,7 @@
 			if (!result?.ok) { throw new Error(result?.error || "Could not start the online refresh"); }
 		}
 		catch (e) {
-			console.warn("[Better Justel] Background update check failed:", e.message);
+			console.warn("[betterlaws] Background update check failed:", e.message);
 			updateStatusMessage(status, "Could not check Justel for updates. The stored act remains available.", 10000);
 		}
 	}
@@ -180,7 +180,7 @@
 	}
 
 	async function main() {
-		console.log(`[Better Justel] main() started (readyState: "${document.readyState}", URL: ${window.location.href})`);
+		console.log(`[betterlaws] main() started (readyState: "${document.readyState}", URL: ${window.location.href})`);
 		// Check if we already consulted eJustice today for this page
 		const currentURL = window.location.origin + window.location.pathname;
 		const today = new Date().toISOString().slice(0, 10);
@@ -190,7 +190,7 @@
 			 && cached.script == chrome.runtime.getManifest().version
 			 && cached.lastChecked == today ) {
 			// Already checked today — restore from cache without contacting eJustice
-			console.log(`[Better Justel] Already checked today (${today}) — restoring from cache`);
+			console.log(`[betterlaws] Already checked today (${today}) — restoring from cache`);
 			ctx.act = await getStorage(currentURL);
 			if (ctx.act?.content?.length) {
 				window.stop();
@@ -200,13 +200,13 @@
 			}
 			// Cache entry exists in updateInfo but act data missing — fall through to online check
 			ctx.act = {content: []};
-			console.warn("[Better Justel] Cache entry found but act data missing — falling back to online check");
+			console.warn("[betterlaws] Cache entry found but act data missing — falling back to online check");
 		}
 		// Identify act
 		const infoResult = await analyseFirstInfo();
 		if (infoResult?.timeout) {
 			// Server is down — try to restore from cache
-			console.warn("[Better Justel] Server timeout — attempting to restore from cache");
+			console.warn("[betterlaws] Server timeout — attempting to restore from cache");
 			// Try to find a cached version for this URL
 			const cachedAct = await getStorage(currentURL);
 			if (cachedAct?.content?.length) {
@@ -220,11 +220,11 @@
 			addLoading("Server unreachable and no cached version available. <a href='javascript:window.location.reload()'>Retry</a>");
 			return;
 		}
-		console.log(`[Better Justel] Act identified: ${ctx.act.eli} (numac: ${ctx.act.numac}, lastUpdate: ${ctx.act.lastUpdate})`);
+		console.log(`[betterlaws] Act identified: ${ctx.act.eli} (numac: ${ctx.act.numac}, lastUpdate: ${ctx.act.lastUpdate})`);
 		// If URL is not ELI, redirect to ELI
 		if ( (currentURL != ctx.act.eli)
 				 && (ctx.act.eli.indexOf("cgi_") == -1) ) {
-			console.log(`[Better Justel] Redirecting to ELI: ${ctx.act.eli}`);
+			console.log(`[betterlaws] Redirecting to ELI: ${ctx.act.eli}`);
 			window.location.href = ctx.act.eli;
 			return;
 		}
@@ -232,7 +232,7 @@
 		if ( (ctx.updateInfo[ctx.act.eli]?.script == chrome.runtime.getManifest().version)
 			 && (ctx.updateInfo[ctx.act.eli]?.act == ctx.act.lastUpdate) ) {
 			// Offline mode candidate — verify the cached data is actually present
-			console.log("[Better Justel] Using cached version (offline mode)");
+			console.log("[betterlaws] Using cached version (offline mode)");
 			const cachedEli = ctx.act.eli;
 			const cachedAct = await getStorage(cachedEli);
 			if (cachedAct?.content?.length) {
@@ -247,24 +247,24 @@
 				return;
 			}
 			// Cache is corrupted/incomplete — mark as stale and fall through to online mode
-			console.warn("[Better Justel] Cached act data missing or empty — forcing online reload");
+			console.warn("[betterlaws] Cached act data missing or empty — forcing online reload");
 			ctx.updateInfo[cachedEli].act = false;
 			await setStorage("updateInfo", ctx.updateInfo);
 		}
 		// Online mode
 		// Page must be loaded and analysed since it cannot be restored
 		{
-			console.log(`[Better Justel] Online mode — need to load and analyse page (readyState: "${document.readyState}", ` +
+			console.log(`[betterlaws] Online mode — need to load and analyse page (readyState: "${document.readyState}", ` +
 				`cachedScript: ${ctx.updateInfo[ctx.act.eli]?.script || "none"}, currentScript: ${chrome.runtime.getManifest().version}, ` +
 				`cachedAct: ${ctx.updateInfo[ctx.act.eli]?.act || "none"}, currentAct: ${ctx.act.lastUpdate})`);
 			addLoading("Loading page from Justel server");
 
 			// Safety timeout: if page analysis doesn't start within 45s, try cache fallback
 			const safetyTimer = setTimeout(async () => {
-				console.error(`[Better Justel] Safety timeout: page analysis did not start within 45s (readyState: "${document.readyState}").`);
+				console.error(`[betterlaws] Safety timeout: page analysis did not start within 45s (readyState: "${document.readyState}").`);
 				const cachedAct = await getStorage(ctx.act.eli);
 				if (cachedAct?.content?.length) {
-					console.log("[Better Justel] Falling back to cached version after safety timeout");
+					console.log("[betterlaws] Falling back to cached version after safety timeout");
 					window.stop();
 					addLoading("Server unreachable — restoring page from offline database");
 					ctx.act = cachedAct;
@@ -276,18 +276,18 @@
 
 			async function runAnalysis() {
 				clearTimeout(safetyTimer);
-				console.log(`[Better Justel] DOM ready — starting analysis (readyState: "${document.readyState}")`);
+				console.log(`[betterlaws] DOM ready — starting analysis (readyState: "${document.readyState}")`);
 				await analyseAct();
 				await displayContent(true);
 			}
 
 			if (document.readyState === "loading") {
 				// DOM not yet parsed — wait for DOMContentLoaded
-				console.log("[Better Justel] Waiting for DOMContentLoaded...");
+				console.log("[betterlaws] Waiting for DOMContentLoaded...");
 				document.addEventListener("DOMContentLoaded", runAnalysis);
 			} else {
 				// DOM already parsed (readyState is "interactive" or "complete")
-				console.log(`[Better Justel] DOM already parsed (readyState: "${document.readyState}"), proceeding immediately`);
+				console.log(`[betterlaws] DOM already parsed (readyState: "${document.readyState}"), proceeding immediately`);
 				await runAnalysis();
 			}
 		}

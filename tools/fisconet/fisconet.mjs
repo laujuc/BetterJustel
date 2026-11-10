@@ -22,7 +22,7 @@ import path from 'node:path';
 
 const core = createRequire(import.meta.url)('../../scripts/lib/fisconet-core.js');
 
-const UA = 'BetterJustel-fisconet-tool/1.0 (+https://github.com/laujuc/BetterJustel)';
+const UA = 'betterlaws-fisconet-tool/1.0 (+https://github.com/laujuc/betterlaws)';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

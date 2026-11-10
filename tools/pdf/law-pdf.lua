@@ -1,4 +1,4 @@
--- Pandoc Lua filter for the Better Justel Typst PDF template
+-- Pandoc Lua filter for the betterlaws Typst PDF template
 --
 -- - Converts the raw HTML <sup>..</sup> and <sub>..</sub> pairs (Justel and
 --   Fisconet ordinals such as 1<sup>er</sup>, footnote markers without a

@@ -16,7 +16,7 @@ try {
 	});
 } catch (e) {
 	document.querySelector("#licenseText").textContent = "(Unable to load license text.)";
-	console.error("[Better Justel] Failed to load LICENSE:", e);
+	console.error("[betterlaws] Failed to load LICENSE:", e);
 }
 
 const cb1 = document.querySelector("#cb1");

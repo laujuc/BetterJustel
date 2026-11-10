@@ -16,35 +16,35 @@ body {
 
 /*
  * Justel applies these reset rules to the online document. Keep them here as
- * part of Better Justel's own page shell so a restored act does not fall back
+ * part of the betterlaws page shell so a restored act does not fall back
  * to the browser's default margins and form-control styling.
  */
-body.better-justel blockquote,
-body.better-justel dl,
-body.better-justel dd,
-body.better-justel h1,
-body.better-justel h2,
-body.better-justel h3,
-body.better-justel h4,
-body.better-justel h5,
-body.better-justel h6,
-body.better-justel hr,
-body.better-justel figure,
-body.better-justel p,
-body.better-justel pre {
+body.betterlaws blockquote,
+body.betterlaws dl,
+body.betterlaws dd,
+body.betterlaws h1,
+body.betterlaws h2,
+body.betterlaws h3,
+body.betterlaws h4,
+body.betterlaws h5,
+body.betterlaws h6,
+body.betterlaws hr,
+body.betterlaws figure,
+body.betterlaws p,
+body.betterlaws pre {
 	margin: 0;
 }
 
-body.better-justel p {
+body.betterlaws p {
 	margin-top: 0.25rem;
 }
 
-body.better-justel a {
+body.betterlaws a {
 	color: inherit;
 	text-decoration: inherit;
 }
 
-body.better-justel button {
+body.betterlaws button {
 	appearance: button;
 	background-color: transparent;
 	background-image: none;

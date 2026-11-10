@@ -2,8 +2,11 @@ window.BJ = window.BJ || {};
 window.BJ.backupModule = function(ctx) {
 
 	// pCloud has no dedicated application folder like Dropbox does:
-	// backups are grouped in a folder reserved to this extension
-	const PCLOUD_FOLDER = "/BetterJustel";
+	// backups are grouped in a folder reserved to this extension.
+	// New backups go to /betterlaws. If /BetterJustel already exists from
+	// before the rename, keep writing there so existing backups are not orphaned.
+	const PCLOUD_FOLDER = "/betterlaws";
+	const PCLOUD_FOLDER_LEGACY = "/BetterJustel";
 
 	async function pcloudRequest(backup, method, params = {}, form = undefined) {
 		// The access token is passed as a query parameter: the pCloud API does
@@ -22,13 +25,31 @@ window.BJ.backupModule = function(ctx) {
 		return result;
 	}
 
+	function pcloudFolderMissing(error) {
+		return /\(code 2005\)|\(code 2009\)/.test(error?.message || "");
+	}
+
+	async function resolvePcloudFolder(backup) {
+		try {
+			await pcloudRequest(backup, "listfolder", {path: PCLOUD_FOLDER_LEGACY});
+			return PCLOUD_FOLDER_LEGACY;
+		}
+		catch (e) {
+			if (!pcloudFolderMissing(e)) {
+				throw e;
+			}
+		}
+		return PCLOUD_FOLDER;
+	}
+
 	async function backupToPcloud(backup, data) {
-		await pcloudRequest(backup, "createfolderifnotexists", {path: PCLOUD_FOLDER});
+		const folder = await resolvePcloudFolder(backup);
+		await pcloudRequest(backup, "createfolderifnotexists", {path: folder});
 		// In the multipart body, parameters must come before the file; a file
 		// with the same name is overwritten (the previous version is kept as a
 		// revision by pCloud)
 		const form = new FormData();
-		form.append("path", PCLOUD_FOLDER);
+		form.append("path", folder);
 		form.append("filename", `${backup.filename}.json`);
 		form.append("data", new Blob([data], {type: "application/json"}), `${backup.filename}.json`);
 		return pcloudRequest(backup, "uploadfile", {}, form);
@@ -73,7 +94,7 @@ window.BJ.backupModule = function(ctx) {
 			catch (e) {
 				// The page must remain usable even if the backup fails; the date
 				// is not recorded so that the backup is retried on next loading
-				console.error(`[Better Justel] Backup to ${provider} failed:`, e);
+				console.error(`[betterlaws] Backup to ${provider} failed:`, e);
 				ctx.showStatusMessage(`Highlights could not be backed up to ${provider}: ${e.message}`);
 				return;
 			}

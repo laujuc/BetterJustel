@@ -8,8 +8,8 @@
 	const core = globalThis.FisconetCore;
 	const CONCURRENCY = 12;
 	const CONFIRM_FROM = 25;
-	const HOST_ID = "betterjustel-fisconet";
-	const READER_ID = "betterjustel-fisconet-reader";
+	const HOST_ID = "betterlaws-fisconet";
+	const READER_ID = "betterlaws-fisconet-reader";
 
 	if (!core || document.getElementById(HOST_ID)) return;
 
@@ -38,7 +38,7 @@
 			button:disabled { opacity: .6; cursor: progress; }
 		</style>
 		<div class="panel">
-			<div class="brand">Better Justel</div>
+			<div class="brand">betterlaws</div>
 			<div class="status"></div>
 			<button type="button" class="lecture">Lecture</button>
 			<button type="button" class="primary">Télécharger en Markdown</button>
@@ -416,7 +416,7 @@
 			<div class="overlay">
 				<header>
 					<div class="titles">
-						<div class="brand">Better Justel · Lecture</div>
+						<div class="brand">betterlaws · Lecture</div>
 						<div class="doc-title"></div>
 					</div>
 					<button type="button" class="close">Fermer</button>

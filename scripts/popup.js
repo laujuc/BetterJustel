@@ -236,7 +236,7 @@ async function togglePcloudBackup() {
 	const clientId = await getPcloudClientId();
 	if (!clientId) { return; }
 	if (!await requestBackupFilename(highlightsBackup)) { return; }
-	alert("You will now be redirected to authorize this app to access your pCloud. Access will be granted to your full pCloud storage; backups are stored in the 'BetterJustel' folder. Backups of your highlights will be made daily.");
+	alert("You will now be redirected to authorize this app to access your pCloud. Access will be granted to your full pCloud storage; backups are stored in the 'betterlaws' folder, or in 'BetterJustel' if that folder already exists. Backups of your highlights will be made daily.");
 	highlightsBackup.provider = "pcloud";
 	highlightsBackup.redirect = "https://www.ejustice.just.fgov.be/loi/loi.htm";
 	await setStorage("highlightsBackup", highlightsBackup);
